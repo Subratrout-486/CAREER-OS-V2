@@ -6,9 +6,26 @@ from urllib.request import Request, urlopen
 
 from career_os.models.job import JobEvidence, JobRecord, JobStatus
 
+_STALE_MARKERS = (
+    "job is no longer available",
+    "position has been filled",
+    "this position has been closed",
+    "job has been closed",
+    "no longer accepting applications",
+    "requisition has been closed",
+)
+
+
+def _content_signal(text: str) -> tuple[str, str] | None:
+    lowered = " ".join(text.casefold().split())
+    for marker in _STALE_MARKERS:
+        if marker in lowered:
+            return "stale_content_marker", marker
+    return None
+
 
 class JobVerifier:
-    """Conservative verification signals; network access is optional and never treated as proof of freshness."""
+    """Conservative verifier. Reachability alone never proves a posting is live."""
 
     def verify_url(self, job: JobRecord, *, timeout: float = 10.0) -> JobRecord:
         checked_at = datetime.now(timezone.utc)
@@ -17,12 +34,22 @@ class JobVerifier:
             with urlopen(request, timeout=timeout) as response:
                 status = getattr(response, "status", 200)
                 final_url = response.geturl()
+                body = response.read(512_000).decode("utf-8", errors="replace")
                 detail = f"HTTP {status}; final_url={final_url}"
                 signal = "url_reachable"
-                if 200 <= status < 400:
-                    job.status = JobStatus.VERIFIED
-                else:
+                if status in {404, 410}:
                     job.status = JobStatus.GHOST
+                    signal = "url_http_error"
+                elif 200 <= status < 400:
+                    stale = _content_signal(body)
+                    if stale:
+                        signal, marker = stale
+                        detail += f"; marker={marker}"
+                        job.status = JobStatus.GHOST
+                    else:
+                        job.status = JobStatus.VERIFIED
+                else:
+                    job.status = JobStatus.UNKNOWN
         except HTTPError as exc:
             detail = f"HTTP {exc.code}"
             signal = "url_http_error"
