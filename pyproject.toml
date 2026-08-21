@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "career-os-v2"
+version = "0.1.0"
+description = "Self-sufficient AI Career OS"
+requires-python = ">=3.11"
+dependencies = [
+  "pydantic>=2.11",
+]
+
+[project.optional-dependencies]
+openai = ["openai-agents>=0.2.0"]
+notion = ["notion-client>=2.5.0"]
+engineering = ["openhands-sdk"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
