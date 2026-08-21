@@ -31,3 +31,25 @@ def test_network_failure_remains_unknown(monkeypatch):
     job = JobVerifier().verify_url(make_job("https://example.com/job"))
     assert job.status is JobStatus.UNKNOWN
     assert job.verification_evidence[-1].signal == "url_unreachable"
+
+
+def test_stale_content_marker_is_classified_as_ghost(monkeypatch):
+    class Response:
+        status = 200
+
+        def geturl(self):
+            return "https://example.com/job"
+
+        def read(self, limit):
+            return b"This position has been closed and is no longer accepting applications."
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+    monkeypatch.setattr("career_os.agents.job_verification.urlopen", lambda *args, **kwargs: Response())
+    job = JobVerifier().verify_url(make_job("https://example.com/job"))
+    assert job.status is JobStatus.GHOST
+    assert job.verification_evidence[-1].signal == "stale_content_marker"
