@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
@@ -21,14 +23,46 @@ class RawATSJob:
 
 
 class ATSClient:
-    """Credential-free public ATS reader. Adapters normalize provider payloads only."""
+    """Credential-free public ATS reader with bounded retries and backoff.
+
+    Adapters normalize provider payloads only. Transport behavior is centralized
+    so every ATS gets the same timeout, retry, throttling and HTTP error policy.
+    """
+
+    _RETRYABLE_HTTP_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
+
+    def __init__(self, *, retries: int = 2, backoff_seconds: float = 0.5):
+        if retries < 0:
+            raise ValueError("retries must be non-negative")
+        if backoff_seconds < 0:
+            raise ValueError("backoff_seconds must be non-negative")
+        self.retries = retries
+        self.backoff_seconds = backoff_seconds
+
+    def _request_json(self, request: Request, *, timeout: float) -> dict | list:
+        last_error: Exception | None = None
+        for attempt in range(self.retries + 1):
+            try:
+                with urlopen(request, timeout=timeout) as response:
+                    status = getattr(response, "status", 200)
+                    if not 200 <= status < 300:
+                        raise RuntimeError(f"ATS returned HTTP {status}")
+                    return json.loads(response.read().decode("utf-8"))
+            except HTTPError as exc:
+                last_error = exc
+                if exc.code not in self._RETRYABLE_HTTP_STATUS:
+                    raise RuntimeError(f"ATS returned HTTP {exc.code}") from exc
+            except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+                last_error = exc
+
+            if attempt < self.retries:
+                time.sleep(self.backoff_seconds * (2**attempt))
+
+        raise RuntimeError("ATS request failed after retries") from last_error
 
     def fetch_json(self, url: str, *, timeout: float = 15.0) -> dict | list:
         req = Request(url, headers={"Accept": "application/json", "User-Agent": "Career-OS-V2/0.1"})
-        with urlopen(req, timeout=timeout) as response:
-            if not 200 <= getattr(response, "status", 200) < 300:
-                raise RuntimeError(f"ATS returned HTTP {response.status}")
-            return json.loads(response.read().decode("utf-8"))
+        return self._request_json(req, timeout=timeout)
 
     def post_json(self, url: str, payload: dict, *, timeout: float = 15.0) -> dict | list:
         body = json.dumps(payload).encode("utf-8")
@@ -42,10 +76,7 @@ class ATSClient:
                 "User-Agent": "Career-OS-V2/0.1",
             },
         )
-        with urlopen(req, timeout=timeout) as response:
-            if not 200 <= getattr(response, "status", 200) < 300:
-                raise RuntimeError(f"ATS returned HTTP {response.status}")
-            return json.loads(response.read().decode("utf-8"))
+        return self._request_json(req, timeout=timeout)
 
 
 def _iso_from_epoch_ms(value: object) -> str | None:
@@ -121,11 +152,7 @@ class AshbyAdapter:
 
 
 class WorkdayAdapter:
-    """Read the public Workday CXS jobs endpoint for a known careers-board URL.
-
-    Workday is intentionally configured by full board URL rather than guessed tenant/site
-    values. This avoids brittle tenant discovery and keeps the adapter deterministic.
-    """
+    """Read the public Workday CXS jobs endpoint for a known careers-board URL."""
 
     provider = "workday"
 
@@ -167,15 +194,9 @@ class WorkdayAdapter:
                 external_path = item.get("externalPath", "")
                 external_id = external_path.rsplit("_", 1)[-1] or external_path
                 jobs.append(RawATSJob(
-                    self.provider,
-                    str(external_id),
-                    company,
-                    item.get("title", ""),
-                    item.get("locationsText"),
-                    item.get("jobDescription", "") or item.get("description", ""),
-                    self._job_url(board_url, external_path),
-                    item.get("postedOn") or item.get("postedDate"),
-                    item,
+                    self.provider, str(external_id), company, item.get("title", ""),
+                    item.get("locationsText"), item.get("jobDescription", "") or item.get("description", ""),
+                    self._job_url(board_url, external_path), item.get("postedOn") or item.get("postedDate"), item,
                 ))
                 if len(jobs) >= max_jobs:
                     break
@@ -200,15 +221,11 @@ class RipplingAdapter:
         items = payload.get("jobs", payload) if isinstance(payload, dict) else payload
         return [
             RawATSJob(
-                self.provider,
-                str(item.get("id") or item.get("jobId") or item.get("slug") or ""),
-                slug,
-                item.get("title", ""),
-                item.get("location") or item.get("locationName"),
+                self.provider, str(item.get("id") or item.get("jobId") or item.get("slug") or ""), slug,
+                item.get("title", ""), item.get("location") or item.get("locationName"),
                 item.get("description") or item.get("descriptionHtml"),
                 item.get("url") or item.get("jobUrl") or item.get("applyUrl", ""),
-                item.get("publishedAt") or item.get("createdAt") or item.get("postedAt"),
-                item,
+                item.get("publishedAt") or item.get("createdAt") or item.get("postedAt"), item,
             )
             for item in items
         ]
