@@ -46,4 +46,7 @@ def test_none_from_planner_completes_run():
 
     assert harness.step() is None
     assert harness.state == AgentState.COMPLETED
-    assert harness.events.snapshot()[-1] == Event("run.completed", {})
+    completed = harness.events.snapshot()[-1]
+    assert completed.kind == "run.completed"
+    assert completed.payload == {}
+    assert completed.event_id
