@@ -25,7 +25,7 @@ def _content_signal(text: str) -> tuple[str, str] | None:
 
 
 class JobVerifier:
-    """Conservative verifier. Reachability alone never proves a posting is live."""
+    """Conservative verifier: reachability is evidence, not proof of freshness."""
 
     def verify_url(self, job: JobRecord, *, timeout: float = 10.0) -> JobRecord:
         checked_at = datetime.now(timezone.utc)
@@ -47,9 +47,11 @@ class JobVerifier:
                         detail += f"; marker={marker}"
                         job.status = JobStatus.GHOST
                     else:
-                        job.status = JobStatus.VERIFIED
+                        job.status = JobStatus.UNKNOWN
+                        signal = "url_reachable_needs_freshness"
                 else:
                     job.status = JobStatus.UNKNOWN
+                    signal = "unexpected_http_status"
         except HTTPError as exc:
             detail = f"HTTP {exc.code}"
             signal = "url_http_error"
