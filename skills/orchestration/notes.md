@@ -1,0 +1,1 @@
+The orchestration layer is intentionally provider-neutral and keeps approval, retry, audit, and routing rules outside model prompts.
