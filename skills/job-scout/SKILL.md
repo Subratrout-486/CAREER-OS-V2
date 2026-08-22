@@ -18,4 +18,4 @@ Use this skill when finding or refreshing job opportunities.
 - Never invent a job, employer, posting date, salary, or application URL.
 - A source failure is isolated to that source and must be observable.
 - Keep deterministic normalization and duplicate decisions outside the model.
-- Use explicit deduplication terminology and preserve the distinction between NEW, VERIFIED, GHOST, and DUPLICATE records.
+- Explicitly deduplicate records and preserve the distinction between NEW, VERIFIED, GHOST, and DUPLICATE records.
