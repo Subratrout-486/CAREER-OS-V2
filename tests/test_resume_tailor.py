@@ -57,3 +57,37 @@ def test_resume_tailor_preserves_summary_and_does_not_invent_content() -> None:
     assert result.summary == "Original factual summary."
     assert result.bullets == ()
     assert "python" not in result.matched_keywords
+
+
+def test_resume_tailor_prioritizes_must_have_over_preferred_and_skill_terms() -> None:
+    resume = ResumeProfile(
+        summary="Support professional.",
+        bullets=(
+            ResumeBullet("Built Power BI dashboards", ("c1",)),
+            ResumeBullet("Troubleshot SQL production issues", ("c1",)),
+        ),
+    )
+    jd = JDAnalysis(
+        source_text="x",
+        must_have_requirements=["SQL"],
+        preferred_requirements=["Power BI"],
+        skills=["Power BI"],
+    )
+
+    result = ResumeTailor().tailor(resume, jd, _ledger())
+
+    assert result.bullets[0].text.startswith("Troubleshot SQL")
+    assert any("must-have" in item for item in result.edit_trace)
+
+
+def test_resume_tailor_normalizes_common_skill_aliases_without_rewriting_text() -> None:
+    resume = ResumeProfile(
+        summary="Support professional.",
+        bullets=(ResumeBullet("Built PowerBI dashboards", ("c1",)),),
+    )
+    jd = JDAnalysis(source_text="x", skills=["Power BI"])
+
+    result = ResumeTailor().tailor(resume, jd, _ledger())
+
+    assert result.bullets[0].text == "Built PowerBI dashboards"
+    assert "power bi" in result.matched_keywords
