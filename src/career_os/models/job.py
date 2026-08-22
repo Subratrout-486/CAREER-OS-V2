@@ -26,6 +26,12 @@ class SourceType(StrEnum):
 
 
 def canonicalize_url(url: str) -> str:
+    """Return one deterministic URL representation for job identity.
+
+    Tracking parameters and the fragment are removed. Non-root paths are
+    normalized to a trailing slash so equivalent source URLs produce the same
+    canonical representation across ATSes and job boards.
+    """
     parts = urlsplit(url.strip())
     scheme = parts.scheme.lower()
     host = (parts.hostname or "").lower()
@@ -33,6 +39,8 @@ def canonicalize_url(url: str) -> str:
     if port and not ((scheme == "https" and port == 443) or (scheme == "http" and port == 80)):
         host = f"{host}:{port}"
     path = parts.path.rstrip("/") or "/"
+    if path != "/":
+        path += "/"
     ignored = {"fbclid", "gclid", "ref", "source", "src"}
     query = urlencode(
         sorted((k, v) for k, v in parse_qsl(parts.query) if not k.lower().startswith("utm_") and k.lower() not in ignored)
