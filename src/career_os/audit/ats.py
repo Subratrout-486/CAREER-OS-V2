@@ -39,8 +39,10 @@ _ALIASES = {
 
 
 def _normalize(value: str) -> str:
-    normalized = re.sub(r"\s+", " ", value.casefold().replace("&", " and ")).strip()
-    return _ALIASES.get(normalized, normalized)
+    normalized = value.casefold().replace("&", " and ")
+    for alias, canonical in sorted(_ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
+        normalized = re.sub(rf"(?<!\w){re.escape(alias)}(?!\w)", canonical, normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
 
 
 def _contains(text: str, term: str) -> bool:
@@ -95,7 +97,14 @@ def audit_resume(resume: TailoredResume, jd: JDAnalysis) -> ATSAudit:
                 )
             )
 
-    coverage = len(matched) / len(all_requirements) if all_requirements else 1.0
+    # Coverage is qualification-first: when explicit must-haves exist, report
+    # their coverage rather than allowing preferred/general keywords to mask gaps.
+    coverage_terms = jd.must_have_requirements or [*jd.preferred_requirements, *jd.skills]
+    coverage = (
+        sum(_contains(resume_text, term) for term in coverage_terms) / len(coverage_terms)
+        if coverage_terms
+        else 1.0
+    )
     if coverage < 0.5 and all_requirements:
         findings.append(
             ATSFinding(
