@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, HttpUrl
 
 
 class JobStatus(StrEnum):
+    NEW = "NEW"
     VERIFIED = "VERIFIED"
     GHOST = "GHOST"
     DUPLICATE = "DUPLICATE"
@@ -53,8 +54,6 @@ def _normalize_text(value: str | None) -> str:
 
 
 def canonical_job_key(company: str, title: str, location: str | None, url: str) -> str:
-    # URL identity is strongest when available; normalized metadata makes the key
-    # stable across tracking URLs and minor source formatting differences.
     normalized = "|".join(
         (_normalize_text(company), _normalize_text(title), _normalize_text(location), canonicalize_url(url))
     )
@@ -85,7 +84,7 @@ class JobRecord(BaseModel):
     source_type: SourceType = SourceType.UNKNOWN
     canonical_key: str
     content_fingerprint: str | None = None
-    status: JobStatus = JobStatus.UNKNOWN
+    status: JobStatus = JobStatus.NEW
     description: str | None = None
     posted_at: datetime | None = None
     verification_evidence: list[JobEvidence] = Field(default_factory=list)
