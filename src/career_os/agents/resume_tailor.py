@@ -34,10 +34,25 @@ def _canonical_text(text: str) -> str:
 
 
 def _terms(text: str) -> set[str]:
-    return {
-        token for token in re.findall(r"[a-z0-9+#.-]+", _canonical_text(text))
+    """Return canonical tokens plus canonical multi-word skills.
+
+    Multi-word canonical terms are retained separately so normalization such
+    as PowerBI -> Power BI does not lose the phrase merely because the token
+    `bi` is too short to survive the generic stop-word/length filter.
+    """
+    canonical = _canonical_text(text)
+    tokens = {
+        token for token in re.findall(r"[a-z0-9+#.-]+", canonical)
         if len(token) > 2 and token not in _STOPWORDS
     }
+    phrases = {
+        canonical_phrase
+        for canonical_phrase in _ALIASES.values()
+        if " " in canonical_phrase and re.search(
+            rf"(?<![a-z0-9]){re.escape(canonical_phrase)}(?![a-z0-9])", canonical
+        )
+    }
+    return tokens | phrases
 
 
 class ResumeTailor:
@@ -62,7 +77,7 @@ class ResumeTailor:
         skill_terms = _terms(" ".join(jd.skills))
         jd_terms = hard_terms | preferred_terms | skill_terms
 
-        ranked: list[tuple[tuple[int, int, int], ResumeBullet]] = []
+        ranked: list[tuple[tuple[int, int, int, int], ResumeBullet]] = []
         for position, bullet in enumerate(resume.bullets):
             valid_ids = tuple(cid for cid in bullet.evidence_claim_ids if cid in supported_claims)
             if not valid_ids:
@@ -72,12 +87,19 @@ class ResumeTailor:
             hard_overlap = len(terms.intersection(hard_terms))
             preferred_overlap = len(terms.intersection(preferred_terms))
             skill_overlap = len(terms.intersection(skill_terms))
+            total_overlap = len(terms.intersection(jd_terms))
+
+            # Treat requirement tiers lexicographically: an explicit must-have
+            # match always outranks a preferred/skill-only match. This avoids
+            # double-counting the same preferred skill when it also appears in
+            # the general skills list.
             relevance = (
-                hard_overlap * 3 + preferred_overlap * 2 + skill_overlap,
-                len(terms.intersection(jd_terms)),
-                -position,
+                hard_overlap,
+                preferred_overlap,
+                skill_overlap,
+                total_overlap,
             )
-            ranked.append((relevance, ResumeBullet(bullet.text, valid_ids)))
+            ranked.append((relevance + (-position,), ResumeBullet(bullet.text, valid_ids)))
 
         ranked.sort(key=lambda item: item[0], reverse=True)
         selected = tuple(bullet for _, bullet in ranked)
