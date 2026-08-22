@@ -121,13 +121,19 @@ class LeverAdapter:
 
     def fetch(self, slug: str) -> list[RawATSJob]:
         payload = self.client.fetch_json(self.api_url(slug))
+        # Lever's public postings endpoint returns a JSON array. Accepting a
+        # {"jobs": [...]} wrapper as well makes the adapter tolerant of cached
+        # fixtures/proxies without changing the canonical adapter contract.
+        items = payload.get("jobs", []) if isinstance(payload, dict) else payload
+        if not isinstance(items, list):
+            raise ValueError("Lever postings payload must contain a list of jobs")
         return [
             RawATSJob(self.provider, str(item.get("id", "")), slug, item.get("text", ""),
                       (item.get("categories") or {}).get("location"),
                       item.get("descriptionPlain") or item.get("description"),
                       item.get("hostedUrl") or item.get("applyUrl", ""),
                       _iso_from_epoch_ms(item.get("createdAt")), item)
-            for item in payload
+            for item in items
         ]
 
 
