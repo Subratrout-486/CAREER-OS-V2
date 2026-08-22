@@ -64,16 +64,19 @@ class JobIntakePipeline:
         records = [self.normalize(raw) for raw in raw_jobs]
         records = self.scout.deduplicate(records)
 
-        # Content identity catches the same posting exposed at different ATS URLs.
+        # JobScout already determines duplicate identity. This second pass adds
+        # the explicit content signal so downstream verification/audit can tell
+        # URL/key duplicates from the same listing appearing at different URLs.
         first_by_fingerprint: dict[str, JobRecord] = {}
         for job in records:
-            if job.status is JobStatus.DUPLICATE or not job.content_fingerprint:
+            if not job.content_fingerprint:
                 continue
             existing = first_by_fingerprint.get(job.content_fingerprint)
-            if existing is not None:
+            if existing is not None and existing.job_id != job.job_id:
                 job.status = JobStatus.DUPLICATE
                 job.duplicate_of = existing.job_id
-                job.risk_signals.append("CONTENT_DUPLICATE")
+                if "CONTENT_DUPLICATE" not in job.risk_signals:
+                    job.risk_signals.append("CONTENT_DUPLICATE")
             else:
                 first_by_fingerprint[job.content_fingerprint] = job
         return records
