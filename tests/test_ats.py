@@ -1,4 +1,10 @@
+import json
+
+import pytest
+
+import career_os.integrations.ats as ats
 from career_os.integrations.ats import (
+    ATSClient,
     AshbyAdapter,
     GreenhouseAdapter,
     LeverAdapter,
@@ -86,3 +92,59 @@ def test_rippling_normalizes_common_fields():
     assert jobs[0].external_id == "r1"
     assert jobs[0].job_url.endswith("/r1")
     assert jobs[0].posted_at == "2026-08-21T00:00:00Z"
+
+
+class _Response:
+    status = 200
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def read(self):
+        return json.dumps({"jobs": []}).encode()
+
+
+def test_ats_client_retries_transient_http_error(monkeypatch):
+    calls = {"count": 0}
+
+    def fake_urlopen(request, timeout):
+        calls["count"] += 1
+        if calls["count"] < 3:
+            from urllib.error import HTTPError
+            raise HTTPError(request.full_url, 503, "temporary", {}, None)
+        return _Response()
+
+    sleeps = []
+    monkeypatch.setattr(ats, "urlopen", fake_urlopen)
+    monkeypatch.setattr(ats.time, "sleep", sleeps.append)
+
+    payload = ATSClient(retries=2, backoff_seconds=0.1).fetch_json("https://example.com/jobs")
+
+    assert payload == {"jobs": []}
+    assert calls["count"] == 3
+    assert sleeps == [0.1, 0.2]
+
+
+def test_ats_client_does_not_retry_non_transient_http_error(monkeypatch):
+    calls = {"count": 0}
+
+    def fake_urlopen(request, timeout):
+        calls["count"] += 1
+        from urllib.error import HTTPError
+        raise HTTPError(request.full_url, 404, "not found", {}, None)
+
+    monkeypatch.setattr(ats, "urlopen", fake_urlopen)
+
+    with pytest.raises(RuntimeError, match="HTTP 404"):
+        ATSClient(retries=3).fetch_json("https://example.com/missing")
+    assert calls["count"] == 1
+
+
+def test_ats_client_rejects_invalid_retry_configuration():
+    with pytest.raises(ValueError):
+        ATSClient(retries=-1)
+    with pytest.raises(ValueError):
+        ATSClient(backoff_seconds=-0.1)
