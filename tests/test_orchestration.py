@@ -49,8 +49,10 @@ def test_approval_resumes_same_node_then_continues() -> None:
 
 
 def test_input_gate_is_distinct_and_resumable() -> None:
-    def needs_input(_: object) -> NodeOutcome:
-        return NodeOutcome.AWAIT_INPUT
+    def needs_input(state) -> NodeOutcome:
+        if "input:question" not in state.context:
+            return NodeOutcome.AWAIT_INPUT
+        return NodeOutcome.NEXT
 
     workflow = WorkflowOrchestrator(
         [
@@ -106,4 +108,6 @@ def test_repository_round_trip_isolated_from_mutation() -> None:
     assert loaded is not None
     assert loaded.context == {"x": 1}
     loaded.context["x"] = 99
-    assert repo.get("run-store").context == {"x": 1}
+    stored = repo.get("run-store")
+    assert stored is not None
+    assert stored.context == {"x": 1}
