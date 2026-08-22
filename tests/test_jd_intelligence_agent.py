@@ -41,3 +41,29 @@ def test_jd_intelligence_does_not_invent_missing_fields() -> None:
     assert result.location is None
     assert result.compensation is None
     assert "Compensation not explicitly stated" in result.ambiguities
+
+
+def test_jd_intelligence_accepts_common_section_aliases_and_normalizes_skill_aliases() -> None:
+    text = """Key Responsibilities
+- Build dashboards and troubleshoot APIs
+
+Basic Qualifications
+- Experience with Microsoft Excel and RESTful APIs
+- Familiarity with PostgreSQL
+
+Preferred Skills
+- PowerBI and Amazon Web Services
+"""
+
+    result = JDIntelligenceAgent().analyze(text)
+
+    assert "Build dashboards and troubleshoot APIs" in result.responsibilities
+    assert "Experience with Microsoft Excel and RESTful APIs" in result.must_have_requirements
+    assert "PowerBI and Amazon Web Services" in result.preferred_requirements
+    assert result.skills == ["power bi", "excel", "aws", "postgresql", "rest api"] or set(result.skills) == {"power bi", "excel", "aws", "postgresql", "rest api"}
+
+
+def test_jd_intelligence_does_not_match_sql_inside_another_word() -> None:
+    result = JDIntelligenceAgent().analyze("Requirements\n- NoSQL experience")
+
+    assert "sql" not in result.skills
