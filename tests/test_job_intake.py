@@ -41,7 +41,7 @@ def test_same_content_at_different_urls_is_deduplicated():
         },
     ]
     jobs = pipeline.ingest(rows)
-    assert jobs[0].status is JobStatus.UNKNOWN
+    assert jobs[0].status is JobStatus.NEW
     assert jobs[1].status is JobStatus.DUPLICATE
     assert jobs[1].duplicate_of == jobs[0].job_id
     assert "CONTENT_DUPLICATE" in jobs[1].risk_signals
