@@ -1,4 +1,4 @@
-from career_os.agents.evidence_analyzer import EvidenceAnalyzer
+from career_os.agents.evidence_analyzer import ConflictType, EvidenceAnalyzer
 from career_os.models.evidence import EvidenceClaim, EvidenceKind, EvidenceSource, SupportStatus
 
 
@@ -49,3 +49,33 @@ def test_material_gaps_surface_inferred_or_unsupported_claims():
         claim("c2", "Python certification", EvidenceKind.UNKNOWN, SupportStatus.PARTIALLY_SUPPORTED, confidence=0.4),
     ])
     assert [item.claim_id for item in analyzer.material_gaps(ledger)] == ["c2"]
+
+
+def test_conflicting_quantified_claims_are_not_silently_resolved():
+    analyzer = EvidenceAnalyzer()
+    ledger = analyzer.build_ledger([
+        claim("c1", "Reduced processing time by 20%", EvidenceKind.USER_PROVIDED, SupportStatus.SUPPORTED),
+        claim("c2", "Reduced processing time by 40%", EvidenceKind.USER_PROVIDED, SupportStatus.SUPPORTED),
+    ])
+    conflicts = analyzer.conflicts(ledger)
+    assert len(conflicts) == 1
+    assert conflicts[0].conflict_type is ConflictType.QUANTITATIVE
+    assert analyzer.has_conflicts(ledger)
+
+
+def test_identical_claims_are_not_conflicts():
+    analyzer = EvidenceAnalyzer()
+    ledger = analyzer.build_ledger([
+        claim("c1", "Used Oracle SQL", EvidenceKind.USER_PROVIDED, SupportStatus.SUPPORTED),
+        claim("c2", "Used Oracle SQL", EvidenceKind.VERIFIED, SupportStatus.SUPPORTED, EvidenceSource("resume", "resume", "Resume")),
+    ])
+    assert analyzer.conflicts(ledger) == ()
+
+
+def test_conflict_detector_is_conservative_about_unrelated_dates():
+    analyzer = EvidenceAnalyzer()
+    ledger = analyzer.build_ledger([
+        claim("c1", "Worked at Alpha from 2020-2022", EvidenceKind.USER_PROVIDED, SupportStatus.SUPPORTED),
+        claim("c2", "Worked at Beta from 2021-2023", EvidenceKind.USER_PROVIDED, SupportStatus.SUPPORTED),
+    ])
+    assert analyzer.conflicts(ledger) == ()
