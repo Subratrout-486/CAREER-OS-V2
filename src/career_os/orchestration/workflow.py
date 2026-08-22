@@ -54,12 +54,7 @@ class WorkflowNode:
 
 
 class WorkflowOrchestrator:
-    """Dependency-light, deterministic orchestration for Career OS workflows.
-
-    The orchestrator owns state transitions and audit events; specialist agents
-    remain responsible for domain work. State is explicit and serializable so a
-    later durable repository (for example Postgres) can resume a run safely.
-    """
+    """Dependency-light, deterministic orchestration for Career OS workflows."""
 
     def __init__(self, nodes: list[WorkflowNode]) -> None:
         if not nodes:
@@ -92,9 +87,7 @@ class WorkflowOrchestrator:
             if approval is False:
                 state.status = RunStatus.FAILED
                 state.error = "Human approval rejected"
-                state.events.append(
-                    AuditEvent(node_name or "workflow", NodeOutcome.FAIL, state.error)
-                )
+                state.events.append(AuditEvent(node_name or "workflow", NodeOutcome.FAIL, state.error))
                 return state
             if node_name:
                 state.approved_nodes.add(node_name)
@@ -115,9 +108,9 @@ class WorkflowOrchestrator:
         if state.status is RunStatus.PENDING:
             state.status = RunStatus.RUNNING
 
-        start_index = self._next_index(state)
+        index = self._next_index(state)
         state.resume_node = None
-        for index in range(start_index, len(self._order)):
+        while index < len(self._order):
             node = self._nodes[self._order[index]]
             state.current_node = node.name
 
@@ -133,7 +126,7 @@ class WorkflowOrchestrator:
             state.attempts[node.name] = attempt
             try:
                 outcome = node.handler(state)
-            except Exception as exc:  # workflow boundary: preserve failure in state
+            except Exception as exc:
                 outcome = NodeOutcome.FAIL
                 state.error = str(exc)
 
@@ -163,6 +156,8 @@ class WorkflowOrchestrator:
             if outcome is NodeOutcome.COMPLETE:
                 state.status = RunStatus.COMPLETED
                 return state
+
+            index += 1
 
         state.status = RunStatus.COMPLETED
         return state
