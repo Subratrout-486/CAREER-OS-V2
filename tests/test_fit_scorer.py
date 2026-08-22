@@ -60,3 +60,28 @@ def test_unsupported_evidence_cannot_inflate_fit() -> None:
     assert result.hard_requirements == 0.0
     assert result.hard_gaps == ("Python",)
     assert result.recommendation == "hard_gap"
+
+
+def test_common_skill_aliases_match_without_changing_source_evidence() -> None:
+    jd = JDAnalysis(
+        source_text="x",
+        must_have_requirements=["Power BI", "PostgreSQL", "REST API", "AWS"],
+        skills=["Power BI", "PostgreSQL", "REST API", "AWS"],
+    )
+    result = FitScorer().score(
+        jd,
+        _ledger("Built PowerBI dashboards", "Used Postgres", "Integrated RESTful APIs", "Worked with Amazon Web Services"),
+    )
+
+    assert result.hard_requirements == 100.0
+    assert result.hard_gaps == ()
+    assert result.recommendation == "strong_fit"
+
+
+def test_nosql_does_not_match_sql_requirement() -> None:
+    jd = JDAnalysis(source_text="x", must_have_requirements=["SQL"])
+    result = FitScorer().score(jd, _ledger("Worked with NoSQL databases"))
+
+    assert result.hard_requirements == 0.0
+    assert result.hard_gaps == ("SQL",)
+    assert result.recommendation == "hard_gap"
