@@ -41,6 +41,20 @@ def test_ats_audit_normalizes_common_skill_aliases():
     assert audit.missing_requirements == ()
 
 
+def test_ats_audit_does_not_confuse_unrelated_short_terms():
+    resume = TailoredResume(
+        summary="Support analyst with strong operational experience.",
+        bullets=(ResumeBullet("Managed tickets and documented incidents.", ("c1",)),),
+    )
+    jd = JDAnalysis(source_text="Support role", skills=["SQL", "AI"])
+
+    audit = audit_resume(resume, jd)
+
+    assert audit.matched_requirements == ()
+    assert audit.missing_requirements == ("SQL", "AI")
+    assert audit.keyword_coverage == 0.0
+
+
 def test_ats_audit_flags_missing_provenance_without_failing_qualification_gate():
     resume = TailoredResume(
         summary="Analyst",
