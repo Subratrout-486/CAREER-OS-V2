@@ -50,9 +50,16 @@ def test_greenhouse_prefers_first_published():
 
 
 def test_lever_converts_epoch_milliseconds_to_iso():
-    client = FakeClient([{"id": "abc", "text": "Support Engineer", "categories": {"location": "Hyderabad"}, "hostedUrl": "https://jobs.lever.co/acme/abc", "createdAt": 1776600000000}])
+    # Lever's public postings endpoint is an array of posting objects.
+    client = FakeClient([[{"id": "abc", "text": "Support Engineer", "categories": {"location": "Hyderabad"}, "hostedUrl": "https://jobs.lever.co/acme/abc", "createdAt": 1776600000000}]])
     jobs = LeverAdapter(client).fetch("acme")
     assert jobs[0].posted_at == "2026-04-19T12:00:00Z"
+
+
+def test_lever_accepts_jobs_wrapper_from_cached_payloads():
+    client = FakeClient({"jobs": [{"id": "abc", "text": "Support Engineer", "categories": {"location": "Hyderabad"}, "hostedUrl": "https://jobs.lever.co/acme/abc", "createdAt": 1776600000000}]})
+    jobs = LeverAdapter(client).fetch("acme")
+    assert jobs[0].external_id == "abc"
 
 
 def test_ashby_uses_published_at():
