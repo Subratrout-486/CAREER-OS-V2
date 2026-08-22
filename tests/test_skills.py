@@ -11,6 +11,7 @@ EXPECTED_SKILLS = {
     "evidence-analysis",
     "fit-scoring",
     "resume-tailoring",
+    "resume-rendering",
     "ats-audit",
     "recruiter-review",
     "application-management",
