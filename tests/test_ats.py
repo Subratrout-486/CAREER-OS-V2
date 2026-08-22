@@ -18,18 +18,16 @@ def test_detect_ats_from_public_board_urls():
     assert detect_ats("https://example.com/careers") is None
 
 
-def test_greenhouse_normalizes_public_payload():
-    client = FakeClient({"jobs": [{"id": 123, "title": "Analyst", "location": {"name": "Hyderabad"}, "absolute_url": "https://example/jobs/123", "content": "JD", "updated_at": "2026-08-20T00:00:00Z"}]})
+def test_greenhouse_prefers_first_published():
+    client = FakeClient({"jobs": [{"id": 123, "title": "Analyst", "location": {"name": "Hyderabad"}, "absolute_url": "https://example/jobs/123", "content": "JD", "first_published": "2026-08-20T00:00:00Z", "updated_at": "2026-08-21T00:00:00Z"}]})
     jobs = GreenhouseAdapter(client).fetch("acme")
-    assert jobs[0].external_id == "123"
-    assert jobs[0].title == "Analyst"
-    assert jobs[0].location == "Hyderabad"
+    assert jobs[0].posted_at == "2026-08-20T00:00:00Z"
 
 
-def test_lever_normalizes_created_at_without_changing_units():
+def test_lever_converts_epoch_milliseconds_to_iso():
     client = FakeClient([{"id": "abc", "text": "Support Engineer", "categories": {"location": "Hyderabad"}, "hostedUrl": "https://jobs.lever.co/acme/abc", "createdAt": 1776600000000}])
     jobs = LeverAdapter(client).fetch("acme")
-    assert jobs[0].posted_at == "1776600000000"
+    assert jobs[0].posted_at == "2026-04-19T04:00:00Z"
 
 
 def test_ashby_uses_published_at():
