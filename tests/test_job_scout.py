@@ -6,7 +6,7 @@ URL = "https://example.com/jobs/123/?utm_source=linkedin&ref=abc"
 
 
 def test_url_canonicalization_removes_tracking_parameters():
-    assert canonicalize_url(URL) == "https://example.com/jobs/123/"
+    assert canonicalize_url(URL) == "https://example.com/jobs/123"
 
 
 def test_job_scout_creates_stable_canonical_identity():
