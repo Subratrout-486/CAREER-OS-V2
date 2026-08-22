@@ -97,14 +97,16 @@ def audit_resume(resume: TailoredResume, jd: JDAnalysis) -> ATSAudit:
                 )
             )
 
-    # Coverage is qualification-first: when explicit must-haves exist, report
-    # their coverage rather than allowing preferred/general keywords to mask gaps.
-    coverage_terms = jd.must_have_requirements or [*jd.preferred_requirements, *jd.skills]
-    coverage = (
-        sum(_contains(resume_text, term) for term in coverage_terms) / len(coverage_terms)
-        if coverage_terms
-        else 1.0
-    )
+    # Qualification-first coverage: when must-haves exist, their matches are
+    # measured against the complete structured JD so preferred/skill matches
+    # cannot mask an unmet hard requirement. With no must-haves, all terms
+    # contribute normally.
+    if jd.must_have_requirements:
+        matched_must = sum(_contains(resume_text, term) for term in jd.must_have_requirements)
+        coverage = matched_must / len(all_requirements) if all_requirements else 1.0
+    else:
+        coverage = len(matched) / len(all_requirements) if all_requirements else 1.0
+
     if coverage < 0.5 and all_requirements:
         findings.append(
             ATSFinding(
