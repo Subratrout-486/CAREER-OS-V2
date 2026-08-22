@@ -19,8 +19,10 @@ class LearningAgent:
         gaps: list[str],
         *,
         verified_skills: list[str] | None = None,
+        resources_by_skill: dict[str, list[LearningResource]] | None = None,
     ) -> LearningPlan:
         verified = {skill.casefold() for skill in (verified_skills or [])}
+        resource_map = {skill.casefold(): resources for skill, resources in (resources_by_skill or {}).items()}
         objectives: list[LearningObjective] = []
         for raw_gap in gaps:
             skill = raw_gap.strip()
@@ -32,15 +34,7 @@ class LearningAgent:
                     skill=skill,
                     priority=priority,
                     rationale=f"Close the verified {skill} gap for {target_role}.",
-                    resources=[
-                        LearningResource(
-                            title=f"{skill} official documentation",
-                            url=f"https://www.google.com/search?q={skill.replace(' ', '+')}+official+documentation",
-                            provider="Official documentation search",
-                            free=True,
-                            reason="Use primary documentation before paid courses.",
-                        )
-                    ],
+                    resources=resource_map.get(skill.casefold(), []),
                     practice_tasks=[
                         PracticeTask(
                             title=f"Build a {skill} practice task",
