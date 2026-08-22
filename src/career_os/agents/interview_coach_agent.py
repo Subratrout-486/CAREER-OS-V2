@@ -1,30 +1,51 @@
 from __future__ import annotations
 
+import re
+
 from career_os.models.interview import AnswerEvaluation, AnswerScore, InterviewQuestion, InterviewQuestionType
 
 
 class InterviewCoachAgent:
     """Deterministic interview planning and answer-coaching primitives."""
 
-    def generate_questions(self, competencies: list[str], evidence: list[str], *, limit: int = 10) -> list[InterviewQuestion]:
+    def generate_questions(
+        self,
+        competencies: list[str],
+        evidence: list[str] | None = None,
+        *,
+        limit: int = 10,
+    ) -> list[InterviewQuestion]:
+        evidence = evidence or []
         return [
             InterviewQuestion(
                 text=f"Tell me about a specific example demonstrating {competency}.",
                 question_type=InterviewQuestionType.ROLE_SPECIFIC,
                 competency=competency,
                 evidence_basis=evidence[:3],
-                follow_ups=["What was your specific contribution?", "What was the measurable result?", "What would you do differently?"],
+                follow_ups=[
+                    "What was your specific contribution?",
+                    "What was the measurable result?",
+                    "What would you do differently?",
+                ],
             )
             for competency in competencies[:limit]
         ]
 
-    def evaluate_answer(self, question: InterviewQuestion, answer: str, evidence: list[str]) -> AnswerEvaluation:
+    def evaluate_answer(
+        self,
+        question: InterviewQuestion,
+        answer: str,
+        evidence: list[str],
+    ) -> AnswerEvaluation:
         text = answer.strip()
         lower = text.casefold()
+        competency_terms = set(re.findall(r"[a-z0-9]+", question.competency.casefold()))
+        answer_terms = set(re.findall(r"[a-z0-9]+", lower))
+        relevant = bool(competency_terms) and bool(competency_terms & answer_terms)
         has_structure = all(marker in lower for marker in ("situation", "task", "action", "result"))
         used_evidence = [item for item in evidence if item.casefold() in lower]
         score = AnswerScore(
-            relevance=5 if question.competency.casefold() in lower else 2,
+            relevance=5 if relevant else 2,
             structure=5 if has_structure else 2,
             specificity=5 if any(ch.isdigit() for ch in text) else 2,
             evidence=5 if used_evidence else 1,
