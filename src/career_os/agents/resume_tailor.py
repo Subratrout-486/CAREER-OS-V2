@@ -11,16 +11,42 @@ _STOPWORDS = {
     "year", "using", "use", "ability", "strong", "good", "work", "working", "role",
 }
 
+# Keep tailoring deterministic and aligned with the canonical JD taxonomy.
+# These aliases change matching only; they never add a claim to the resume.
+_ALIASES = {
+    "powerbi": "power bi",
+    "power-bi": "power bi",
+    "restful api": "rest api",
+    "restful apis": "rest api",
+    "postgres": "postgresql",
+    "postgres db": "postgresql",
+    "amazon web services": "aws",
+    "microsoft azure": "azure",
+    "google cloud platform": "gcp",
+}
+
+
+def _canonical_text(text: str) -> str:
+    value = text.casefold()
+    for alias, canonical in sorted(_ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
+        value = re.sub(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", canonical, value)
+    return value
+
 
 def _terms(text: str) -> set[str]:
     return {
-        token for token in re.findall(r"[a-z0-9+#.-]+", text.casefold())
+        token for token in re.findall(r"[a-z0-9+#.-]+", _canonical_text(text))
         if len(token) > 2 and token not in _STOPWORDS
     }
 
 
 class ResumeTailor:
-    """Creates a conservative JD-aligned resume draft from existing facts."""
+    """Creates a conservative JD-aligned resume draft from existing facts.
+
+    Tailoring is intentionally evidence-preserving: it may reorder existing
+    bullets and expose matched keywords, but it never invents or rewrites a
+    claim that is not backed by the evidence ledger.
+    """
 
     name = "resume_tailor"
 
@@ -30,15 +56,28 @@ class ResumeTailor:
             for claim in ledger.claims
             if claim.support in {SupportStatus.SUPPORTED, SupportStatus.PARTIALLY_SUPPORTED}
         }
-        jd_terms = _terms(" ".join((*jd.must_have_requirements, *jd.preferred_requirements, *jd.skills)))
 
-        ranked: list[tuple[int, ResumeBullet]] = []
-        for bullet in resume.bullets:
-            terms = _terms(bullet.text)
-            overlap = len(terms.intersection(jd_terms))
+        hard_terms = _terms(" ".join(jd.must_have_requirements))
+        preferred_terms = _terms(" ".join(jd.preferred_requirements))
+        skill_terms = _terms(" ".join(jd.skills))
+        jd_terms = hard_terms | preferred_terms | skill_terms
+
+        ranked: list[tuple[tuple[int, int, int], ResumeBullet]] = []
+        for position, bullet in enumerate(resume.bullets):
             valid_ids = tuple(cid for cid in bullet.evidence_claim_ids if cid in supported_claims)
-            if valid_ids:
-                ranked.append((overlap, ResumeBullet(bullet.text, valid_ids)))
+            if not valid_ids:
+                continue
+
+            terms = _terms(bullet.text)
+            hard_overlap = len(terms.intersection(hard_terms))
+            preferred_overlap = len(terms.intersection(preferred_terms))
+            skill_overlap = len(terms.intersection(skill_terms))
+            relevance = (
+                hard_overlap * 3 + preferred_overlap * 2 + skill_overlap,
+                len(terms.intersection(jd_terms)),
+                -position,
+            )
+            ranked.append((relevance, ResumeBullet(bullet.text, valid_ids)))
 
         ranked.sort(key=lambda item: item[0], reverse=True)
         selected = tuple(bullet for _, bullet in ranked)
@@ -50,6 +89,8 @@ class ResumeTailor:
         edit_trace = ("Reordered evidence-backed bullets by JD relevance.",)
         if matched:
             edit_trace += ("Prioritized existing JD-aligned keywords without adding new claims.",)
+        if hard_terms:
+            edit_trace += ("Weighted explicit must-have requirements above preferred requirements and general skills.",)
 
         return TailoredResume(
             summary=summary,
