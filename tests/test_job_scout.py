@@ -5,8 +5,12 @@ from career_os.models.job import JobStatus, SourceType, canonicalize_url
 URL = "https://example.com/jobs/123/?utm_source=linkedin&ref=abc"
 
 
-def test_url_canonicalization_removes_tracking_parameters():
-    assert canonicalize_url(URL) == "https://example.com/jobs/123"
+def test_url_canonicalization_removes_tracking_parameters_and_normalizes_slash():
+    assert canonicalize_url(URL) == "https://example.com/jobs/123/"
+
+
+def test_url_canonicalization_preserves_root_path():
+    assert canonicalize_url("https://example.com/?utm_source=linkedin") == "https://example.com/"
 
 
 def test_job_scout_creates_stable_canonical_identity():
