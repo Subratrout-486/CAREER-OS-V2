@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TypeVar
 
 from career_os.core.retry import RetryPolicy, retry_call
+from career_os.core.service_limits import ServiceLimiter
 
 T = TypeVar("T")
 
@@ -22,17 +23,24 @@ def execute_bounded(
     max_workers: int = 4,
     retry_policy: RetryPolicy | None = None,
     retryable: Callable[[Exception], bool] | None = None,
+    service_limiter: ServiceLimiter | None = None,
+    service_for: Callable[[str], str] | None = None,
 ) -> dict[str, ExecutionResult | Exception]:
-    """Execute independent source tasks with bounded concurrency and retries."""
+    """Execute independent source tasks with bounded concurrency, service limits and retries."""
     if max_workers < 1:
         raise ValueError("max_workers must be >= 1")
+    limiter = service_limiter
+    resolver = service_for or (lambda name: name)
+
+    def run_one(name: str, task: Callable[[], T]):
+        execute = lambda: retry_call(task, policy=retry_policy, retryable=retryable)
+        if limiter is None:
+            return execute()
+        return limiter.run(resolver(name), execute)
 
     results: dict[str, ExecutionResult | Exception] = {}
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {
-            pool.submit(retry_call, task, policy=retry_policy, retryable=retryable): name
-            for name, task in tasks
-        }
+        futures = {pool.submit(run_one, name, task): name for name, task in tasks}
         for future in as_completed(futures):
             name = futures[future]
             try:
