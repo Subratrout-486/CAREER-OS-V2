@@ -35,6 +35,7 @@ class WorkflowState:
     run_id: str
     status: RunStatus = RunStatus.PENDING
     current_node: str | None = None
+    resume_node: str | None = None
     context: dict[str, Any] = field(default_factory=dict)
     events: list[AuditEvent] = field(default_factory=list)
     attempts: dict[str, int] = field(default_factory=dict)
@@ -95,20 +96,24 @@ class WorkflowOrchestrator:
                 )
                 return state
             state.approval_node = None
+            state.resume_node = node_name
             state.status = RunStatus.RUNNING
 
         if state.status is RunStatus.WAITING_INPUT:
             if input_value is None:
                 return state
-            if state.input_node:
-                state.context[f"input:{state.input_node}"] = input_value
+            node_name = state.input_node
+            if node_name:
+                state.context[f"input:{node_name}"] = input_value
             state.input_node = None
+            state.resume_node = node_name
             state.status = RunStatus.RUNNING
 
         if state.status is RunStatus.PENDING:
             state.status = RunStatus.RUNNING
 
         start_index = self._next_index(state)
+        state.resume_node = None
         for index in range(start_index, len(self._order)):
             node = self._nodes[self._order[index]]
             state.current_node = node.name
@@ -130,14 +135,15 @@ class WorkflowOrchestrator:
                 state.error = str(exc)
 
             state.events.append(AuditEvent(node.name, outcome, state.error or ""))
-            state.error = None if outcome is not NodeOutcome.FAIL else state.error
 
             if outcome is NodeOutcome.AWAIT_APPROVAL:
                 state.approval_node = node.name
+                state.resume_node = node.name
                 state.status = RunStatus.WAITING_APPROVAL
                 return state
             if outcome is NodeOutcome.AWAIT_INPUT:
                 state.input_node = node.name
+                state.resume_node = node.name
                 state.status = RunStatus.WAITING_INPUT
                 return state
             if outcome is NodeOutcome.RETRY:
@@ -153,13 +159,14 @@ class WorkflowOrchestrator:
                 return state
             if outcome is NodeOutcome.COMPLETE:
                 state.status = RunStatus.COMPLETED
-                state.current_node = node.name
                 return state
 
         state.status = RunStatus.COMPLETED
         return state
 
     def _next_index(self, state: WorkflowState) -> int:
-        if state.current_node is None:
+        node = state.resume_node or state.current_node
+        if node is None:
             return 0
-        return self._order.index(state.current_node) + 1
+        index = self._order.index(node)
+        return index if state.resume_node else index + 1
