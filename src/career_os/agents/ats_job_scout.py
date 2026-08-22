@@ -3,7 +3,14 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from career_os.agents.job_intake import JobIntakePipeline
-from career_os.integrations.ats import AshbyAdapter, GreenhouseAdapter, LeverAdapter, RawATSJob
+from career_os.integrations.ats import (
+    AshbyAdapter,
+    GreenhouseAdapter,
+    LeverAdapter,
+    RawATSJob,
+    RipplingAdapter,
+    WorkdayAdapter,
+)
 from career_os.models.job import JobRecord
 
 
@@ -37,3 +44,9 @@ class ATSJobScout:
 
     def ashby(self, slug: str) -> list[JobRecord]:
         return self.ingest(AshbyAdapter().fetch(slug))
+
+    def workday(self, board_url: str, *, max_jobs: int = 100) -> list[JobRecord]:
+        return self.ingest(WorkdayAdapter().fetch(board_url, max_jobs=max_jobs))
+
+    def rippling(self, slug: str) -> list[JobRecord]:
+        return self.ingest(RipplingAdapter().fetch(slug))
