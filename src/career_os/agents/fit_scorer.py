@@ -11,11 +11,32 @@ _STOPWORDS = {
     "year", "using", "use", "ability", "strong", "good", "work", "working", "role",
 }
 
+# Keep this deliberately small and deterministic. JD Intelligence owns the
+# canonical taxonomy; Fit Scorer only bridges common resume/JD spellings.
+_ALIASES = {
+    "powerbi": "power bi",
+    "power-bi": "power bi",
+    "restful api": "rest api",
+    "restful apis": "rest api",
+    "postgres": "postgresql",
+    "postgres db": "postgresql",
+    "amazon web services": "aws",
+    "microsoft azure": "azure",
+    "google cloud platform": "gcp",
+}
+
+
+def _canonical_text(text: str) -> str:
+    value = text.casefold()
+    for alias, canonical in sorted(_ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
+        value = re.sub(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", canonical, value)
+    return value
+
 
 def _terms(text: str) -> set[str]:
     return {
         token
-        for token in re.findall(r"[a-z0-9+#.-]+", text.casefold())
+        for token in re.findall(r"[a-z0-9+#.-]+", _canonical_text(text))
         if len(token) > 2 and token not in _STOPWORDS
     }
 
