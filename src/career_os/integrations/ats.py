@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from datetime import datetime, timezone
 from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 
 @dataclass(frozen=True)
@@ -23,12 +23,22 @@ class RawATSJob:
 class ATSClient:
     """Credential-free public ATS reader. Adapters normalize provider payloads only."""
 
-    def fetch_json(self, url: str, *, timeout: float = 15.0) -> dict:
+    def fetch_json(self, url: str, *, timeout: float = 15.0) -> dict | list:
         req = Request(url, headers={"Accept": "application/json", "User-Agent": "Career-OS-V2/0.1"})
         with urlopen(req, timeout=timeout) as response:
             if not 200 <= getattr(response, "status", 200) < 300:
                 raise RuntimeError(f"ATS returned HTTP {response.status}")
             return json.loads(response.read().decode("utf-8"))
+
+
+def _iso_from_epoch_ms(value: object) -> str | None:
+    if value in (None, ""):
+        return None
+    try:
+        milliseconds = int(value)
+    except (TypeError, ValueError):
+        return None
+    return datetime.fromtimestamp(milliseconds / 1000, tz=timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 class GreenhouseAdapter:
@@ -44,17 +54,9 @@ class GreenhouseAdapter:
     def fetch(self, slug: str) -> list[RawATSJob]:
         payload = self.client.fetch_json(self.api_url(slug))
         return [
-            RawATSJob(
-                provider=self.provider,
-                external_id=str(item.get("id", "")),
-                company=slug,
-                title=item.get("title", ""),
-                location=(item.get("location") or {}).get("name"),
-                description=item.get("content"),
-                job_url=item.get("absolute_url", ""),
-                posted_at=item.get("updated_at"),
-                raw=item,
-            )
+            RawATSJob(self.provider, str(item.get("id", "")), slug, item.get("title", ""),
+                      (item.get("location") or {}).get("name"), item.get("content"),
+                      item.get("absolute_url", ""), item.get("first_published") or item.get("updated_at"), item)
             for item in payload.get("jobs", [])
         ]
 
@@ -72,17 +74,11 @@ class LeverAdapter:
     def fetch(self, slug: str) -> list[RawATSJob]:
         payload = self.client.fetch_json(self.api_url(slug))
         return [
-            RawATSJob(
-                provider=self.provider,
-                external_id=str(item.get("id", "")),
-                company=slug,
-                title=item.get("text", ""),
-                location=(item.get("categories") or {}).get("location"),
-                description=item.get("descriptionPlain") or item.get("description"),
-                job_url=item.get("hostedUrl") or item.get("applyUrl", ""),
-                posted_at=str(item.get("createdAt")) if item.get("createdAt") is not None else None,
-                raw=item,
-            )
+            RawATSJob(self.provider, str(item.get("id", "")), slug, item.get("text", ""),
+                      (item.get("categories") or {}).get("location"),
+                      item.get("descriptionPlain") or item.get("description"),
+                      item.get("hostedUrl") or item.get("applyUrl", ""),
+                      _iso_from_epoch_ms(item.get("createdAt")), item)
             for item in payload
         ]
 
@@ -100,24 +96,17 @@ class AshbyAdapter:
     def fetch(self, slug: str) -> list[RawATSJob]:
         payload = self.client.fetch_json(self.api_url(slug))
         return [
-            RawATSJob(
-                provider=self.provider,
-                external_id=str(item.get("jobUrl", "")),
-                company=slug,
-                title=item.get("title", ""),
-                location=item.get("location"),
-                description=item.get("descriptionPlain") or item.get("descriptionHtml"),
-                job_url=item.get("jobUrl", ""),
-                posted_at=item.get("publishedAt") or item.get("updatedAt"),
-                raw=item,
-            )
+            RawATSJob(self.provider, str(item.get("jobUrl", "")), slug, item.get("title", ""),
+                      item.get("location"), item.get("descriptionPlain") or item.get("descriptionHtml"),
+                      item.get("jobUrl", ""), item.get("publishedAt") or item.get("updatedAt"), item)
             for item in payload.get("jobs", [])
         ]
 
 
 def detect_ats(url: str) -> tuple[str, str] | None:
-    host = urlparse(url).netloc.casefold()
-    path = [part for part in urlparse(url).path.split("/") if part]
+    parsed = urlparse(url)
+    host = parsed.netloc.casefold()
+    path = [part for part in parsed.path.split("/") if part]
     if "greenhouse.io" in host and path:
         return "greenhouse", path[0]
     if "lever.co" in host and path:
