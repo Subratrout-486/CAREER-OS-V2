@@ -1,0 +1,1 @@
+Implementation is intentionally dependency-light. `WorkflowState` carries execution context, `WorkflowNode` defines specialist work, and `WorkflowOrchestrator` owns deterministic routing, approval pauses, bounded retries, failure capture, audit events, and idempotent completion replay.

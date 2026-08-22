@@ -1,0 +1,1 @@
+The orchestration layer coordinates specialist departments but does not invent domain results. High-impact external actions remain behind explicit approval and confirmation evidence. Provider credentials are not required by the orchestration core.

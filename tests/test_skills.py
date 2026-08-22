@@ -17,6 +17,7 @@ EXPECTED_SKILLS = {
     "application-management",
     "interview-coach",
     "learning",
+    "orchestration",
 }
 
 

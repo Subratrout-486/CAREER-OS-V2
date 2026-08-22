@@ -1,0 +1,1 @@
+The orchestration contract is a typed state machine with explicit outcomes, bounded retries, approval pauses, and audit events. It is the stable boundary between workflow control and specialist agent implementations.

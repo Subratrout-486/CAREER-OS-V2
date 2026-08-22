@@ -1,0 +1,6 @@
+- Research proven orchestration patterns before implementation.
+- Keep routing deterministic and testable.
+- Pause high-impact work for human approval.
+- Record audit events.
+- Bound retries.
+- Verify exact commit in CI before merge.

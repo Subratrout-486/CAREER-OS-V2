@@ -1,0 +1,1 @@
+Verification gate: all workflow tests must pass before integration. The orchestration core must remain provider-free, preserve audit events, pause for approval, bound retries, and be idempotent after completion.
