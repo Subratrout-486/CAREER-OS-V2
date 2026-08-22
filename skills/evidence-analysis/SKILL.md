@@ -17,3 +17,6 @@ Use this skill when evaluating whether a candidate claim is supported.
 ## Rules
 - Never manufacture evidence to improve a match score.
 - Preserve provenance for every material claim.
+- Treat inferred and unknown claims as gaps, not as verified experience.
+- Require explicit provenance for verified claims.
+- Never upgrade evidence confidence merely because a claim sounds plausible.
