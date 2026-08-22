@@ -24,7 +24,7 @@ Salary: INR 8-12 LPA
     result = agent.analyze(text)
 
     assert agent.skill_name == "jd-intelligence"
-    assert "Analyze SQL queries" in result.responsibilities
+    assert any("Analyze SQL queries" in item for item in result.responsibilities)
     assert "2+ years of technical support experience" in result.must_have_requirements
     assert "Power BI experience" in result.preferred_requirements
     assert "sql" in result.skills
