@@ -23,6 +23,7 @@ def test_job_scout_creates_stable_canonical_identity():
     )
     assert first.canonical_key == second.canonical_key
     assert first.source_type is SourceType.OFFICIAL_CAREER_PAGE
+    assert first.status is JobStatus.NEW
 
 
 def test_ats_source_is_classified_without_browser_dependency():
@@ -41,7 +42,7 @@ def test_job_scout_marks_duplicate_without_deleting_the_record():
         company="Acme", title="Analyst", location="Hyderabad", source_url="https://example.com/jobs/1?utm_medium=jobboard", source="jobboard"
     )
     records = scout.deduplicate([first, second])
-    assert records[0].status is JobStatus.UNKNOWN
+    assert records[0].status is JobStatus.NEW
     assert records[1].status is JobStatus.DUPLICATE
     assert records[1].duplicate_of == records[0].job_id
 
