@@ -27,8 +27,20 @@ class ATSAudit:
         return not any(f.severity == "error" for f in self.findings)
 
 
+_ALIASES = {
+    "powerbi": "power bi",
+    "restful api": "rest api",
+    "restful apis": "rest api",
+    "postgres": "postgresql",
+    "amazon web services": "aws",
+    "microsoft azure": "azure",
+    "google cloud platform": "gcp",
+}
+
+
 def _normalize(value: str) -> str:
-    return re.sub(r"\s+", " ", value.casefold().replace("&", " and ")).strip()
+    normalized = re.sub(r"\s+", " ", value.casefold().replace("&", " and ")).strip()
+    return _ALIASES.get(normalized, normalized)
 
 
 def _contains(text: str, term: str) -> bool:
