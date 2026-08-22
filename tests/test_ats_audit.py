@@ -64,3 +64,23 @@ def test_ats_audit_flags_missing_provenance_without_failing_qualification_gate()
 
     assert audit.passed
     assert any(f.category == "provenance" and f.severity == "warning" for f in audit.findings)
+
+
+def test_ats_audit_hard_requirement_cannot_be_masked_by_preferred_or_skill_matches():
+    resume = TailoredResume(
+        summary="Analyst using PowerBI and RESTful APIs.",
+        bullets=(ResumeBullet("Validated reports and API integrations.", ("c1",)),),
+    )
+    jd = JDAnalysis(
+        source_text="Support role",
+        must_have_requirements=["Python"],
+        preferred_requirements=["REST API"],
+        skills=["Power BI"],
+    )
+
+    audit = audit_resume(resume, jd)
+
+    assert audit.matched_requirements == ("REST API", "Power BI")
+    assert audit.missing_requirements == ("Python",)
+    assert audit.keyword_coverage == 0.0
+    assert not audit.passed
