@@ -25,7 +25,7 @@ def test_ats_audit_matches_requirements_and_reports_gaps():
     assert not audit.passed
 
 
-def test_ats_audit_does_not_flag_supported_alias_like_phrase_as_missing():
+def test_ats_audit_normalizes_common_skill_aliases():
     resume = TailoredResume(
         summary="Analyst using PowerBI and RESTful APIs.",
         bullets=(ResumeBullet("Validated reports and API integrations.", ("c1",)),),
@@ -37,8 +37,8 @@ def test_ats_audit_does_not_flag_supported_alias_like_phrase_as_missing():
 
     audit = audit_resume(resume, jd)
 
-    assert audit.keyword_coverage == 0.5
-    assert audit.missing_requirements == ("Power BI", "REST API")
+    assert audit.keyword_coverage == 1.0
+    assert audit.missing_requirements == ()
 
 
 def test_ats_audit_flags_missing_provenance_without_failing_qualification_gate():
