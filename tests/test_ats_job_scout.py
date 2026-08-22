@@ -21,5 +21,5 @@ def test_ats_job_scout_feeds_records_into_canonical_intake():
     assert len(records) == 1
     assert records[0].company == "Acme"
     assert records[0].title == "Product Support Analyst"
-    assert records[0].source_url == raw.job_url
+    assert str(records[0].source_url) == raw.job_url
     assert records[0].status is not JobStatus.DUPLICATE
