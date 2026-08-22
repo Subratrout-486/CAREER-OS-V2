@@ -39,6 +39,7 @@ class WorkflowState:
     context: dict[str, Any] = field(default_factory=dict)
     events: list[AuditEvent] = field(default_factory=list)
     attempts: dict[str, int] = field(default_factory=dict)
+    approved_nodes: set[str] = field(default_factory=set)
     approval_node: str | None = None
     input_node: str | None = None
     error: str | None = None
@@ -95,6 +96,8 @@ class WorkflowOrchestrator:
                     AuditEvent(node_name or "workflow", NodeOutcome.FAIL, state.error)
                 )
                 return state
+            if node_name:
+                state.approved_nodes.add(node_name)
             state.approval_node = None
             state.resume_node = node_name
             state.status = RunStatus.RUNNING
@@ -118,7 +121,7 @@ class WorkflowOrchestrator:
             node = self._nodes[self._order[index]]
             state.current_node = node.name
 
-            if node.requires_approval and state.approval_node != node.name:
+            if node.requires_approval and node.name not in state.approved_nodes:
                 state.approval_node = node.name
                 state.status = RunStatus.WAITING_APPROVAL
                 state.events.append(
