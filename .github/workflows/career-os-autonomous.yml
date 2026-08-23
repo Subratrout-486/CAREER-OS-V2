@@ -67,17 +67,19 @@ jobs:
         id: gemini
         if: steps.controller.outputs.provider == 'gemini'
         continue-on-error: true
-        uses: google-github-actions/run-gemini-cli@f77273f4c914e4bf38440cf36a0369cb64a37489 # v0.1.22
+        uses: google-github-actions/run-gemini-cli@387c8ddb7a72078825da941758b811b9153c71e8 # latest verified main commit as of 2026-08-21
         env:
           GEMINI_CLI_TRUST_WORKSPACE: "true"
           GITHUB_TOKEN: ${{ github.token }}
         with:
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-          gemini_cli_version: "preview"
+          gemini_cli_version: "0.55.1"
           gemini_debug: false
           upload_artifacts: false
           workflow_name: "career-os-autonomous"
-          prompt-file: .career-os/AUTONOMOUS_AGENT_PROMPT.md
+          # run-gemini-cli exposes only the supported `prompt` input. Gemini CLI's
+          # @ file-reference injects the repository prompt into --prompt safely.
+          prompt: "@.career-os/AUTONOMOUS_AGENT_PROMPT.md"
           settings: |-
             {
               "model": {
@@ -96,7 +98,7 @@ jobs:
           PYTHONPATH: src
           CAREER_OS_STATE: .career-os/provider-state.json
           CAREER_OS_PROVIDERS: gemini,codex
-          PROVIDER_FAILURE_MESSAGE: ${{ steps.gemini.outputs.gemini_errors || 'Gemini provider action failed; inspect this run for the provider error.' }}
+          PROVIDER_FAILURE_MESSAGE: ${{ steps.gemini.outputs.error || 'Gemini provider action failed; inspect this run for the provider error.' }}
         run: |
           set -euo pipefail
           provider_model="$(printf '%s' "$PROVIDER_FAILURE_MESSAGE" | grep -oE 'model: [A-Za-z0-9._-]+' | head -1 | sed 's/^model: //' || true)"
