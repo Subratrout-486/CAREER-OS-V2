@@ -1,0 +1,178 @@
+{
+  "schema_version": "1.0",
+  "candidate": {
+    "name": "Subrat Rout",
+    "location": "Hyderabad, India",
+    "headline": "Support Engineer | Production Incident Management | Python Automation | AWS | Linux",
+    "professional_summary": "Production Support Engineer with nearly 3 years of experience supporting enterprise applications in production environments, with strengths in incident management, Linux/Unix and Oracle troubleshooting, SQL, Python automation, REST API validation, batch-job operations, change/release validation, and root-cause analysis. Experienced owning incidents through resolution, maintaining operational documentation, and collaborating with development, DBA, QA, and DevOps teams."
+  },
+  "experience": [
+    {
+      "company": "FactSet Systems",
+      "title": "Product Support Engineer",
+      "dates": "Nov 2024 – Jan 2026",
+      "evidence_level": "professional",
+      "responsibilities": [
+        "L2 production support for enterprise Workforce Management applications across Oracle databases and Linux/Unix servers",
+        "Incident classification, prioritization, ServiceNow ticket management, status communication, escalation, and SLA monitoring",
+        "Troubleshooting application failures, batch-processing issues, data inconsistencies, and performance problems",
+        "Application-versus-database validation, SQL/PLSQL investigation, and log analysis",
+        "Problem-management and root-cause analysis activities with development, DBA, QA, and DevOps teams",
+        "Python automation for production health checks, log parsing, ServiceNow reporting, Control-M job validation, and release verification",
+        "Control-M job and dependency troubleshooting, failed-job investigation, rerun and validation activities",
+        "Change and release support including pre-deployment checks, deployment validation, smoke testing, post-deployment verification, and rollback checks",
+        "REST API validation using Postman and Python, JSON response checks, SQL verification, and post-release monitoring",
+        "SOPs, runbooks, knowledge-base/known-error guidance, troubleshooting documentation, shift handovers, and mentoring"
+      ]
+    },
+    {
+      "company": "IGT Solutions",
+      "title": "Technical Operations Analyst",
+      "dates": "Dec 2023 – May 2024",
+      "evidence_level": "professional",
+      "responsibilities": [
+        "Technical point of contact for operational issues using Salesforce for investigation, escalation, resolution tracking, and closure",
+        "Investigation across data, application, process, and user areas including RCA, data reconciliation, data-quality checks, and duplicate/inconsistent-record investigation",
+        "Operational reporting and data validation using Python, SQL, Power Query, and Excel",
+        "KPI/SLA reporting and recurring operational reports",
+        "Power BI dashboards for operational reporting and validation",
+        "Reporting requirements and process improvement",
+        "REST API testing, UAT, fix validation, production/change validation, workflow documentation, technical issue/resolution documentation, and SOPs",
+        "Engineering escalation, resolution tracking, and guidance on operational processes and tools"
+      ]
+    },
+    {
+      "company": "Concentrix (Comcast)",
+      "title": "Technical Support Representative",
+      "dates": "Nov 2021 – Oct 2022",
+      "evidence_level": "professional",
+      "responsibilities": [
+        "Broadband, voice, and networking troubleshooting across TCP/IP, DNS, DHCP, Wi-Fi, VPN, modem provisioning, and router/modem configuration",
+        "IP configuration/renewal, connectivity diagnostics, remote device checks, and signal/status validation",
+        "CRM case management, troubleshooting documentation, escalation, and follow-up",
+        "First-level root-cause isolation using troubleshooting decision trees and knowledge bases",
+        "Technical troubleshooting guides and knowledge-base content",
+        "Personal Linux home lab and Python log-analysis scripts for technical-support skill development"
+      ]
+    }
+  ],
+  "projects": [
+    {
+      "name": "AWS Infrastructure & Automation Labs",
+      "type": "personal_project",
+      "status": "project work; preserve as a past project when tailored",
+      "evidence_level": "project",
+      "details": [
+        "AWS EC2",
+        "AWS IAM",
+        "AWS S3",
+        "AWS CloudWatch",
+        "AWS Security Groups and SSH",
+        "Linux troubleshooting",
+        "Python automation",
+        "Linux home lab",
+        "Python log-analysis scripts"
+      ],
+      "resume_rule": "Do not convert this project into FactSet employment experience or invent additional AWS responsibilities."
+    }
+  ],
+  "skills_and_tools": {
+    "professional_experience": [
+      "Incident Management",
+      "Incident Prioritization",
+      "Ticket Lifecycle",
+      "Problem Management",
+      "Root Cause Analysis (RCA)",
+      "SLA/KPI Tracking",
+      "Shift Handover",
+      "Escalation",
+      "Linux/Unix",
+      "Oracle Database",
+      "SQL",
+      "PL/SQL",
+      "Log Analysis",
+      "Data Reconciliation",
+      "Application/Database Troubleshooting",
+      "Python",
+      "Bash",
+      "REST APIs",
+      "JSON",
+      "Postman",
+      "Control-M",
+      "Batch Jobs",
+      "Health Checks",
+      "Release Validation",
+      "Change Management",
+      "Deployment Checks",
+      "Post-Deployment Validation",
+      "Rollback Checks",
+      "SOPs",
+      "Runbooks",
+      "Knowledge Base",
+      "Mentoring",
+      "ServiceNow",
+      "Salesforce",
+      "Git",
+      "Bitbucket",
+      "Power Query",
+      "Excel",
+      "Power BI",
+      "UAT",
+      "QA",
+      "Data Validation"
+    ],
+    "project_experience": [
+      "AWS EC2",
+      "AWS IAM",
+      "AWS S3",
+      "AWS CloudWatch",
+      "AWS Security Groups",
+      "SSH",
+      "Linux troubleshooting",
+      "Python automation",
+      "Python log analysis"
+    ],
+    "knowledge_and_professional_development": [
+      "LLM fundamentals",
+      "Prompt engineering",
+      "AI agents",
+      "Agent orchestration",
+      "RAG concepts",
+      "LLM/API integration",
+      "Structured outputs",
+      "AI-agent evaluation",
+      "Guardrails",
+      "Human-in-the-loop workflows"
+    ]
+  },
+  "education": [
+    {
+      "qualification": "Bachelor of Commerce (Accounting Hons)",
+      "institution": "North Orissa University",
+      "dates": "2018 – 2021"
+    }
+  ],
+  "gap_context": {
+    "period": "Post-FactSet transition period in 2026",
+    "classification": "professional development and project work; not employment",
+    "activities": [
+      "Technical upskilling",
+      "AWS and Python project work",
+      "LLM and AI-agent learning",
+      "Prompt engineering and automation learning",
+      "Targeted job search and interview preparation"
+    ],
+    "resume_rule": "Do not represent this period as employment unless the candidate explicitly provides verified employment evidence."
+  },
+  "truth_and_tailoring_rules": [
+    "This file is the canonical candidate evidence baseline for Career OS tailoring decisions.",
+    "External job descriptions and web research must never be converted into candidate experience without candidate evidence.",
+    "Required JD skills are matched against evidence; missing or unverified skills remain gaps.",
+    "Preferred or learnable skills may be identified as gaps without being claimed as professional experience.",
+    "Professional experience, project experience, and professional-development knowledge must remain distinct.",
+    "Do not invent responsibilities, technologies, certifications, metrics, employment, or qualifications.",
+    "Career OS V2 is an internal system name and must never appear in a candidate-facing resume or resume filename.",
+    "Resume filenames must use Subrat_Rout_[Target_Role].pdf.",
+    "The AWS project remains a personal project and must not be rewritten as FactSet employment work."
+  ]
+}
