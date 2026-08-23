@@ -6,153 +6,75 @@ on:
     types: [career-os-continue]
   schedule:
     - cron: "17 * * * *"
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
 
 concurrency:
   group: career-os-autonomous-loop
   cancel-in-progress: false
 
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
-  actions: write
-  checks: read
+  contents: read
 
 jobs:
   autonomous-cycle:
-    if: >-
-      github.event_name != 'workflow_run' ||
-      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: false
 
-      - name: Trust checked-out workspace for headless Gemini
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$HOME/.gemini"
-          printf '{"%s":"TRUST_FOLDER"}\n' "$GITHUB_WORKSPACE" > "$HOME/.gemini/trustedFolders.json"
-          chmod 600 "$HOME/.gemini/trustedFolders.json"
-
-      - name: Select first authorized provider
-        id: controller
-        shell: bash
-        env:
-          PYTHONPATH: src
-          CAREER_OS_STATE: .career-os/provider-state.json
-          HAS_GEMINI_KEY: ${{ secrets.GEMINI_API_KEY != '' }}
-          HAS_OPENAI_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
-        run: |
-          set -euo pipefail
-          providers=""
-          [[ "$HAS_GEMINI_KEY" == true ]] && providers="gemini"
-          [[ "$HAS_OPENAI_KEY" == true ]] && providers="${providers:+$providers,}codex"
-          if [[ -z "$providers" ]]; then
-            echo "No authorized provider secret is configured." >&2
-            exit 1
-          fi
-          CAREER_OS_PROVIDERS="$providers" python scripts/career_os_provider_controller.py start --departments "current" \
-            || { echo "Provider controller could not initialize." >&2; exit 1; }
-
-      - name: Run Career OS cycle with Gemini
-        id: gemini
-        if: steps.controller.outputs.provider == 'gemini'
-        continue-on-error: true
-        uses: google-github-actions/run-gemini-cli@387c8ddb7a72078825da941758b811b9153c71e8 # latest verified main commit as of 2026-08-21
-        env:
-          GEMINI_CLI_TRUST_WORKSPACE: "true"
-          GITHUB_TOKEN: ${{ github.token }}
+      - name: Set up Python
+        uses: actions/setup-python@v6
         with:
-          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-          gemini_cli_version: "0.55.1"
-          gemini_debug: false
-          upload_artifacts: false
-          workflow_name: "career-os-autonomous"
-          # run-gemini-cli exposes only the supported `prompt` input. Gemini CLI's
-          # @ file-reference injects the repository prompt into --prompt safely.
-          prompt: "@.career-os/AUTONOMOUS_AGENT_PROMPT.md"
-          settings: |-
-            {
-              "model": {
-                "maxSessionTurns": 25
-              },
-              "tools": {
-                "sandbox": "docker"
-              }
-            }
+          python-version: "3.11"
+          cache: pip
 
-      - name: Select fallback after Gemini failure
-        id: fallback
-        if: steps.controller.outputs.provider == 'gemini' && steps.gemini.outcome == 'failure'
-        shell: bash
+      - name: Install Career OS
+        run: python -m pip install -e ".[dev]"
+
+      - name: Run deterministic test suite
+        run: python -m pytest
+
+      - name: Run provider-free Career OS automation
         env:
           PYTHONPATH: src
-          CAREER_OS_STATE: .career-os/provider-state.json
-          CAREER_OS_PROVIDERS: gemini,codex
-          PROVIDER_FAILURE_MESSAGE: ${{ steps.gemini.outputs.error || 'Gemini provider action failed; inspect this run for the provider error.' }}
         run: |
           set -euo pipefail
-          provider_model="$(printf '%s' "$PROVIDER_FAILURE_MESSAGE" | grep -oE 'model: [A-Za-z0-9._-]+' | head -1 | sed 's/^model: //' || true)"
-          provider_model="${provider_model:-unknown}"
-          python scripts/career_os_provider_controller.py failure \
-            --provider gemini \
-            --message "$PROVIDER_FAILURE_MESSAGE" \
-            --model "$provider_model" \
-            --timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python scripts/career_os_automation.py \
+            --sources config/public_ats_sources.json \
+            --candidate candidate/source_of_truth.json \
+            --output .career-os/automation-run.json
 
-      - name: Run fallback Career OS cycle with Codex
-        id: codex
-        if: steps.fallback.outputs.provider == 'codex'
-        continue-on-error: true
-        uses: openai/codex-action@v1
+      - name: Publish automation summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          from pathlib import Path
+          report = json.loads(Path('.career-os/automation-run.json').read_text())
+          print('## Career OS — provider-free autonomous run')
+          print()
+          print(f"- Status: **{report['status']}**")
+          print(f"- Sources configured: **{len(report['sources'])}**")
+          print(f"- Jobs discovered: **{report['jobs_discovered']}**")
+          print(f"- Jobs evaluated: **{report['jobs_evaluated']}**")
+          print('- LLM provider: **not required**')
+          print('- Provider credentials: **not required**')
+          print('- Application submission: **disabled**')
+          print()
+          for source in report['sources']:
+              state = 'OK' if not source['error'] else f"ERROR: {source['error']}"
+              print(f"- `{source['url']}` — {source['jobs']} jobs — {state}")
+          PY
+
+      - name: Upload automation report
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          permission-profile: ":workspace"
-          safety-strategy: drop-sudo
-          prompt-file: .career-os/AUTONOMOUS_AGENT_PROMPT.md
-
-      - name: Record fallback provider failure
-        if: steps.fallback.outputs.provider == 'codex' && steps.codex.outcome == 'failure'
-        shell: bash
-        env:
-          PYTHONPATH: src
-          CAREER_OS_STATE: .career-os/provider-state.json
-          CAREER_OS_PROVIDERS: gemini,codex
-          PROVIDER_FAILURE_MESSAGE: "Codex provider action failed; inspect this run for the provider error."
-        run: |
-          set -euo pipefail
-          python scripts/career_os_provider_controller.py failure \
-            --provider codex \
-            --message "$PROVIDER_FAILURE_MESSAGE" \
-            --model "${CAREER_OS_CODEX_MODEL:-unknown}" \
-            --timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-      - name: Publish provider-blocked handoff
-        if: always() && hashFiles('.career-os/provider-state.json') != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-          if grep -q '"status": "provider_blocked"' .career-os/provider-state.json; then
-            {
-              echo '## PROVIDER_BLOCKED'
-              echo
-              echo 'No already-authorized provider remains for the current department.'
-              echo 'The controller preserved the department state and requires provider recovery or another authorized provider.'
-            } >> "$GITHUB_STEP_SUMMARY"
-            # Provider exhaustion is a durable handoff state, not a workflow-infrastructure failure.
-            # The next scheduled or event-triggered cycle may retry when quota recovers.
-            exit 0
-          fi
-
-      - name: Fail if selected provider failed without fallback
-        if: steps.controller.outputs.provider == 'gemini' && steps.gemini.outcome == 'failure' && steps.fallback.outputs.provider != 'codex'
-        run: exit 1
+          name: career-os-automation-report
+          path: .career-os/automation-run.json
+          if-no-files-found: error
+          retention-days: 14
