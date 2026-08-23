@@ -2,7 +2,7 @@
 
 CAREER-OS-V2 is a fresh rebuild of Career OS, being developed incrementally and deliberately **one department at a time**.
 
-The project now includes a portable Agent Skills layer. Skills are small, independently testable capability packages that can be discovered and loaded progressively by the runtime without requiring a model provider or external connector.
+The project includes a portable Agent Skills layer and a deterministic automation core. Skills are small, independently testable capability packages that can be discovered and loaded progressively by the runtime without requiring a model provider or external connector.
 
 ## Current scope
 
@@ -11,27 +11,30 @@ The foundation includes:
 - a Python package and CI baseline;
 - a portable `SkillRegistry` for discovering and validating `SKILL.md` skills;
 - ten Career OS capability definitions: Job Scout, JD Intelligence, Evidence Agent, Fit Scorer, Resume Tailor, ATS Auditor, Recruiter Reviewer, Application Manager, Interview Coach, and Learning Agent;
-- Job Scout as the first detailed skill contract, ready to sit above deterministic ATS/source adapters;
-- a deterministic, checkpointed end-to-end pipeline composing job intake, JD intelligence, evidence analysis, fit scoring, resume tailoring, ATS audit, recruiter review, and application readiness.
+- deterministic public-ATS discovery adapters and a unified provider registry;
+- a deterministic, checkpointed end-to-end pipeline composing job intake, JD intelligence, evidence analysis, fit scoring, resume tailoring, ATS audit, recruiter review, and application readiness;
+- a provider-free autonomous runner that can discover public ATS jobs and evaluate them without Gemini, Codex, API keys, or other LLM credentials.
 
-The skill layer does **not** by itself provide autonomous browser automation, application submission, provider fallback, Conductor/MCP integration, or external credentials. Those capabilities will be added only when a later stage requires them.
+The deterministic automation deliberately does **not** auto-submit applications, accept legal/consent terms, spend money, bypass CAPTCHAs, or invent candidate evidence. Those actions remain explicit approval boundaries.
 
-## Skill format
+## Provider-free autonomous automation
 
-Each skill lives in its own directory:
+The scheduled GitHub Actions workflow `.github/workflows/career-os-autonomous.yml` does not invoke Gemini, Codex, or any other AI provider. It installs the repository, runs the deterministic test suite, scans configured public ATS sources, evaluates matching jobs through the local Career OS pipeline, and uploads an auditable JSON report.
 
-```text
-skills/<skill-name>/
-└── SKILL.md
+Configure public careers URLs in `config/public_ats_sources.json`. Supported public ATS routing currently includes Greenhouse, Lever, Ashby, Workday, Rippling, SmartRecruiters, and Teamtailor. The configuration is intentionally empty by default so no company is contacted until a source is explicitly configured.
+
+```bash
+python scripts/career_os_automation.py \
+  --sources config/public_ats_sources.json \
+  --candidate candidate/source_of_truth.json \
+  --output .career-os/automation-run.json
 ```
 
-`SKILL.md` uses the portable Agent Skills format with YAML frontmatter containing `name` and `description`, followed by concise operational instructions. Larger references, scripts, or assets can be added inside the same skill directory later.
-
-The runtime discovers metadata without loading unrelated skills and loads the full instruction body only for the requested skill. This keeps the architecture composable and avoids putting every department's rules into one giant prompt.
+This mode is intentionally deterministic. It provides reliable discovery, filtering, evidence-grounded fit scoring, resume prioritization, ATS checks, application-readiness decisions, checkpoints, and reporting. It does not claim LLM-level semantic reasoning; an optional provider can be added later as an enrichment adapter without becoming a dependency of the core automation.
 
 ## End-to-end pipeline
 
-`CareerPipeline` composes the deterministic department stages in this order: job intake, JD intelligence, evidence analysis, fit scoring, resume tailoring, ATS audit, recruiter review, and application readiness. It persists an atomic JSON checkpoint after each stage and resumes only within the same run identifier. The pipeline does not call providers, merge pull requests, submit applications, or infer missing personal facts. Application submission remains behind the explicit `ApplicationManager` approval and confirmation-evidence boundary.
+`CareerPipeline` composes the deterministic department stages in this order: job intake, JD intelligence, evidence analysis, fit scoring, resume tailoring, ATS audit, recruiter review, and application readiness. It persists an atomic JSON checkpoint after each stage. The pipeline does not call providers, merge pull requests, submit applications, or infer missing personal facts.
 
 ```python
 from pathlib import Path
@@ -41,7 +44,9 @@ pipeline = CareerPipeline(Path(".career-os/pipeline-checkpoint.json"))
 result = pipeline.run(run_id="candidate-role-001", raw_job=raw_job, resume=resume, claims=claims)
 ```
 
-Provider execution remains owned by the GitHub Actions controller. Provider quota or outage failures are recorded as provider-blocked state and never treated as successful Career OS completion.
+## Research basis
+
+The provider-free design was informed by current open-source patterns rather than copied wholesale. `santifer/career-ops` demonstrates zero-token public ATS scanning, deduplication, liveness verification, and a human-controlled application boundary. `narendranathe/tailor-resume` demonstrates a deterministic weighted ATS gate and an explicit refusal to fabricate missing evidence. GitHub's current Agentic Workflows documentation recommends combining deterministic Actions with optional agentic reasoning rather than replacing deterministic automation with agents. These patterns fit Career OS's existing evidence and checkpoint architecture.
 
 ## Development
 
@@ -65,4 +70,5 @@ python -m pip install -e ".[openai-agents]"
 - Preserve provenance and distinguish verified evidence from inference.
 - Make each department independently testable.
 - Treat external integrations and authentication as explicit boundaries rather than hidden dependencies.
-- Persist checkpoints at stage boundaries and keep nondeterministic provider calls outside the deterministic pipeline core.
+- Persist checkpoints at stage boundaries.
+- Keep optional nondeterministic provider calls outside the deterministic pipeline core.
