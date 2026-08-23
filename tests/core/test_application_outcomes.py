@@ -1,11 +1,16 @@
+from uuid import uuid4
+
 from career_os.core.application_outcomes import ApplicationOutcomeAnalyzer
 from career_os.models.application import ApplicationRecord, ApplicationStatus
-from career_os.models.job import JobRecord
 
 
 def _app(status: ApplicationStatus) -> ApplicationRecord:
-    job = JobRecord(company="Acme", title="Analyst", source_url="https://example.com/job")
-    app = ApplicationRecord(job_id=job.job_id, source_url=job.source_url, company=job.company, role=job.title)
+    app = ApplicationRecord(
+        job_id=uuid4(),
+        source_url="https://example.com/job",
+        company="Acme",
+        role="Analyst",
+    )
     if status == ApplicationStatus.REJECTED:
         app.transition(ApplicationStatus.READY_FOR_REVIEW)
         app.transition(ApplicationStatus.APPROVED)
