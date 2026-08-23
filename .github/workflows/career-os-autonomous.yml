@@ -140,7 +140,9 @@ jobs:
               echo 'No already-authorized provider remains for the current department.'
               echo 'The controller preserved the department state and requires provider recovery or another authorized provider.'
             } >> "$GITHUB_STEP_SUMMARY"
-            exit 1
+            # Provider exhaustion is a durable handoff state, not a workflow-infrastructure failure.
+            # The next scheduled or event-triggered cycle may retry when quota recovers.
+            exit 0
           fi
 
       - name: Fail if selected provider failed without fallback
