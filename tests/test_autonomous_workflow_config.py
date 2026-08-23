@@ -43,6 +43,12 @@ def test_autonomous_workflow_preserves_research_first_sequence():
     assert research < implement < tests < pr < verify < handoff
 
 
+def test_provider_blocked_is_a_durable_handoff_not_infrastructure_failure():
+    assert "Provider exhaustion is a durable handoff state" in WORKFLOW
+    assert "exit 0" in WORKFLOW
+    assert "Fail if selected provider failed without fallback" in WORKFLOW
+
+
 def test_controller_runs_before_provider_actions():
     controller = WORKFLOW.index("Select first authorized provider")
     gemini = WORKFLOW.index("Run Career OS cycle with Gemini")
