@@ -47,7 +47,7 @@ class JDAnalyzer:
         "project management": {"project management"},
         "data analysis": {"data analysis", "data analytics"},
     }
-    _SENIORITY = ("intern", "entry level", "junior", "associate", "mid-level", "mid level", "senior", "lead", "principal", "staff", "manager", "director", "head", "vp", "vice president")
+    _SENIORITY = ("Intern", "Entry Level", "Junior", "Associate", "Mid-Level", "Mid Level", "Senior", "Lead", "Principal", "Staff", "Manager", "Director", "Head", "VP", "Vice President")
     _WORK_MODELS = ("remote", "hybrid", "on-site", "onsite", "on site")
     _LOCATION_RE = re.compile(r"\b(?:location|based in|office in|job location)\s*[:\-]?\s*([^\n]+)", re.I)
     _COMP_RE = re.compile(r"(?:\$|₹|€|£)\s?[\d,]+(?:\.\d+)?(?:\s*[-–]\s*(?:\$|₹|€|£)?\s?[\d,]+(?:\.\d+)?)?(?:\s*(?:per year|annually|/year|per annum|per hour|/hour))?", re.I)
