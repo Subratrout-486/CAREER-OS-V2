@@ -1,0 +1,12 @@
+{
+  "schema_version": "1.0",
+  "sources": [],
+  "filters": {
+    "title_keywords": [],
+    "exclude_title_keywords": [],
+    "locations": [],
+    "max_jobs_per_source": 100,
+    "max_jobs_per_run": 100,
+    "min_description_chars": 120
+  }
+}
