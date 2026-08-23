@@ -18,6 +18,10 @@ EXPECTED_SKILLS = {
     "interview-coach",
     "learning",
     "orchestration",
+    "research-first-planning",
+    "systematic-debugging",
+    "test-driven-development",
+    "secure-pr-handoff",
 }
 
 

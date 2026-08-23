@@ -38,3 +38,12 @@ The declared departments are implemented as deterministic modules and have dedic
 The controller now classifies configuration failures separately from authorization failures, persists provider, model, timestamp, failure kind, and retry eligibility, applies bounded cooldowns for quota/rate-limit/temporary/outage/model-unavailable failures, preserves department and phase state, and avoids repeated requests while a provider is in cooldown. Unknown and authorization/configuration failures are not automatically retried. The workflow remains provider-neutral, research-first, sandboxed, least-privilege, and merge-boundary safe.
 
 Focused recovery tests pass. The full local suite is otherwise green except for the known environment-only Playwright Chromium executable absence; GitHub CI installs Chromium. Remaining work is to verify the recovery behavior in GitHub Actions and run a genuine provider-backed department cycle when an authorized provider has available quota.
+
+
+## Curated autonomous-development skills
+
+Research was performed against `sickn33/agentic-awesome-skills` (the requested antigravity-awesome-skills path resolves to that catalog) and selected source skill documents. The full catalog was not installed or executed. Existing Career OS orchestration already covers explicit state, deterministic routing, bounded retries, audit events, idempotency, and approval gates. The smallest non-duplicative high-value set was selected: `research-first-planning`, `systematic-debugging`, `test-driven-development`, and `secure-pr-handoff`.
+
+These four skills were implemented as reviewed local instruction files with no executable payloads. The autonomous prompt now requires the curated set and explicitly forbids external catalog installation. The manifest records provenance, exclusions, safety rules, and acceptance criteria. Providers, credentials, sandbox settings, and the provider controller were not changed.
+
+Focused curated-skill and workflow tests pass: 13 passed. The full deterministic suite excluding the environment-dependent PDF browser test passes: 190 passed. The complete local suite still has the known Playwright Chromium executable absence; this is an environment limitation, not a curated-skill failure. The branch is ready for CI validation; no merge is authorized until exact-head CI is green.
