@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from career_os.integrations.ats import RawATSJob, WorkdayAdapter
+from career_os.integrations.ats import RawATSJob
 from career_os.integrations.provider_registry import ATSProviderRegistry
 
 
@@ -20,16 +20,12 @@ class ATSDiscoveryService:
         self.registry = registry or ATSProviderRegistry()
 
     def scan(self, careers_url: str, *, max_jobs: int = 100) -> DiscoveryResult:
+        if max_jobs <= 0:
+            raise ValueError("max_jobs must be positive")
         match = self.registry.resolve(careers_url)
         if match is None:
             return DiscoveryResult(careers_url, None, ())
-
-        if match.provider == "workday":
-            jobs = match.adapter.fetch(careers_url, max_jobs=max_jobs)
-        elif match.provider in {"teamtailor", "smartrecruiters"}:
-            jobs = match.adapter.fetch(match.identifier)
-        else:
-            jobs = match.adapter.fetch(match.identifier)
+        jobs = match.adapter.fetch(match.identifier, max_jobs=max_jobs) if match.provider == "workday" else match.adapter.fetch(match.identifier)
         return DiscoveryResult(careers_url, match.provider, tuple(jobs[:max_jobs]))
 
     @staticmethod
