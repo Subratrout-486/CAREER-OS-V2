@@ -17,6 +17,7 @@ EXPECTED_SKILLS = {
     "application-management",
     "interview-coach",
     "learning",
+    "follow-up",
     "orchestration",
     "research-first-planning",
     "systematic-debugging",
