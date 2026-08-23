@@ -41,3 +41,7 @@ confirmed submission / interview event
 ## Research basis
 
 Open-source job trackers commonly model follow-up reminders from application dates, and more advanced trackers combine follow-up reminders with application state and ghost-response detection. The implementation here deliberately keeps the external communication step human-controlled. This is consistent with durable human-in-the-loop workflow patterns where approvals/actions must survive retries and state changes.
+
+## CI verification checkpoint
+
+This branch exists only to execute the repository's full GitHub Actions test suite against the completed follow-up implementation before the department is accepted.
