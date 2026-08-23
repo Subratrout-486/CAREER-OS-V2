@@ -38,4 +38,4 @@ def test_autonomous_workflow_is_scheduled_and_auditable():
     assert "workflow_dispatch:" in WORKFLOW
     assert "actions/upload-artifact@v4" in WORKFLOW
     assert "career-os-automation-report" in WORKFLOW
-    assert "application submission: **disabled**" in WORKFLOW
+    assert "Application submission: **disabled**" in WORKFLOW
