@@ -1,0 +1,86 @@
+name: Career OS Autonomous Loop
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [career-os-continue]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+concurrency:
+  group: career-os-autonomous-loop
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+  checks: read
+
+jobs:
+  autonomous-cycle:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Run Career OS autonomous coding cycle
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          safety-strategy: drop-sudo
+          permission-profile: workspace-write
+          codex-args: >-
+            --full-auto
+            --skip-git-repo-check
+          prompt: |
+            You are the autonomous Career OS V2 development agent.
+
+            Read .career-os/AUTONOMOUS_LOOP.md before doing anything.
+            Inspect the current repository, open PRs, recent CI runs, and current department state.
+
+            Execute ONE bounded autonomous cycle. Do not wait for the repository owner to say "proceed".
+
+            Mandatory method:
+            1. Research relevant existing GitHub repositories and web solutions for the current problem.
+            2. Compare alternatives and choose the best proven pattern that fits this repository.
+            3. Implement the smallest coherent change.
+            4. Add/update deterministic regression tests.
+            5. Run tests locally when practical.
+            6. Create/update a PR rather than writing directly to main.
+            7. Dispatch the repository CI workflow explicitly for the exact head when needed using workflow_dispatch, then inspect its result.
+            8. If CI fails, research the actual failure, implement a fix, and repeat verification. Do not weaken or remove tests to manufacture a green result.
+            9. Merge only after exact-head CI is green and the change is within the autonomous scope.
+            10. After a successful merge, inspect the next eligible department and continue on the next cycle.
+
+            Important:
+            - Never claim success without an actual successful exact-head CI result.
+            - Never silently resolve conflicting user evidence; use the Evidence Ledger/conflict gates.
+            - Never submit a real job application, accept external terms, spend money, or perform another consequential external action. Those require human approval.
+            - If the current blocker genuinely requires the owner (credential, OAuth/consent, missing personal fact, legal/financial decision), record HUMAN_REQUIRED with the exact action needed and stop this cycle.
+            - If no change is needed, record a concise NOOP reason instead of creating noise.
+
+            The goal is to make measurable progress, not to produce a report. Prefer implementation and verification over commentary.
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Continue after an autonomous cycle
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run "Career OS Autonomous Loop" \
+            --repo "${{ github.repository }}" \
+            --ref main
