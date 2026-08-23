@@ -62,7 +62,7 @@ jobs:
             6. Create/update a PR rather than writing directly to main.
             7. Dispatch the repository CI workflow explicitly for the exact head when needed using workflow_dispatch, then inspect its result.
             8. If CI fails, research the actual failure, implement a fix, and repeat verification. Do not weaken or remove tests to manufacture a green result.
-            9. NEVER merge a PR. When a PR is fully verified, hand it to the external merge operator by adding a concise PR comment beginning with `READY_TO_MERGE` and including the exact PR number, exact head SHA, and CI run URL. If a suitable human-required tracking issue already exists, update it; otherwise create one titled `HUMAN_REQUIRED: Merge PR #<number>`.
+            9. NEVER merge a PR. When a PR is fully verified, add a concise PR comment beginning with READY_TO_MERGE and including the exact PR number, exact head SHA, and CI run URL. If a suitable human-required tracking issue already exists, update it; otherwise create one titled HUMAN_REQUIRED: Merge PR #<number>.
             10. After a merge is detected, record the next eligible department so the next CI-triggered cycle can continue.
 
             Important:
