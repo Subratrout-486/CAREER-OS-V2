@@ -63,7 +63,7 @@ jobs:
             7. Dispatch the repository CI workflow explicitly for the exact head when needed using workflow_dispatch, then inspect its result.
             8. If CI fails, research the actual failure, implement a fix, and repeat verification. Do not weaken or remove tests to manufacture a green result.
             9. Merge only after exact-head CI is green and the change is within the autonomous scope.
-            10. After a successful merge, inspect the next eligible department and continue on the next cycle.
+            10. After a successful merge, record the next eligible department so the next scheduled/CI-triggered cycle can continue.
 
             Important:
             - Never claim success without an actual successful exact-head CI result.
@@ -73,14 +73,6 @@ jobs:
             - If no change is needed, record a concise NOOP reason instead of creating noise.
 
             The goal is to make measurable progress, not to produce a report. Prefer implementation and verification over commentary.
-        env:
-          GH_TOKEN: ${{ github.token }}
 
-      - name: Continue after an autonomous cycle
-        if: success()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh workflow run "Career OS Autonomous Loop" \
-            --repo "${{ github.repository }}" \
-            --ref main
