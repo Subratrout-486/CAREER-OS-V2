@@ -5,39 +5,30 @@ WORKFLOW = (ROOT / ".github" / "workflows" / "career-os-autonomous.yml").read_te
 PROMPT = (ROOT / ".career-os" / "AUTONOMOUS_AGENT_PROMPT.md").read_text()
 
 
-def test_autonomous_workflow_uses_supported_provider_adapters_safely():
-    assert "google-github-actions/run-gemini-cli@387c8ddb7a72078825da941758b811b9153c71e8" in WORKFLOW
-    assert "openai/codex-action@v1" in WORKFLOW
-    assert "gemini_api_key: ${{ secrets.GEMINI_API_KEY }}" in WORKFLOW
-    assert "openai-api-key: ${{ secrets.OPENAI_API_KEY }}" in WORKFLOW
-    assert 'gemini_cli_version: "0.55.1"' in WORKFLOW
-    assert 'GEMINI_CLI_TRUST_WORKSPACE: "true"' in WORKFLOW
-    assert '"sandbox": "docker"' in WORKFLOW
-    assert 'permission-profile: ":workspace"' in WORKFLOW
-    assert "safety-strategy: drop-sudo" in WORKFLOW
+def test_autonomous_workflow_is_provider_free():
+    assert "google-github-actions/run-gemini-cli" not in WORKFLOW
+    assert "openai/codex-action" not in WORKFLOW
+    assert "GEMINI_API_KEY" not in WORKFLOW
+    assert "OPENAI_API_KEY" not in WORKFLOW
+    assert "career_os_provider_controller.py" not in WORKFLOW
+    assert "provider-free real-job smoke cycle" in WORKFLOW
+    assert "python scripts/native_job_smoke_test.py" in WORKFLOW
     assert 'persist-credentials: false' in WORKFLOW
     assert "danger-full-access" not in WORKFLOW
     assert "--full-auto" not in WORKFLOW
     assert "--sandbox" not in WORKFLOW
 
 
-def test_gemini_prompt_uses_supported_file_injection_and_real_error_output():
-    assert 'prompt: "@.career-os/AUTONOMOUS_AGENT_PROMPT.md"' in WORKFLOW
-    assert "prompt-file: .career-os/AUTONOMOUS_AGENT_PROMPT.md" in WORKFLOW
-    assert "steps.gemini.outputs.error" in WORKFLOW
-    assert "steps.gemini.outputs.gemini_errors" not in WORKFLOW
-
-
-def test_autonomous_workflow_preserves_external_merge_handoff():
-    assert "pull-requests: write" in WORKFLOW
-    assert "issues: write" in WORKFLOW
-    assert "NEVER merge a PR" in PROMPT
+def test_autonomous_workflow_preserves_safe_handoff_and_verification_contract():
+    assert "contents: read" in WORKFLOW
+    assert "actions: read" in WORKFLOW
+    assert "workflow_run" in WORKFLOW
+    assert "schedule:" in WORKFLOW
     assert "READY_TO_MERGE" in PROMPT
+    assert "NEVER merge a PR" in PROMPT
     assert "exact PR number, exact head SHA, and CI run URL" in PROMPT
     assert "HUMAN_REQUIRED" in PROMPT
     assert "PROVIDER_BLOCKED" in PROMPT
-    assert "workflow_run" in WORKFLOW
-    assert "schedule:" in WORKFLOW
 
 
 def test_autonomous_workflow_preserves_research_first_sequence():
@@ -50,15 +41,7 @@ def test_autonomous_workflow_preserves_research_first_sequence():
     assert research < implement < tests < pr < verify < handoff
 
 
-def test_provider_blocked_is_a_durable_handoff_not_infrastructure_failure():
-    assert "Provider exhaustion is a durable handoff state" in WORKFLOW
-    assert "exit 0" in WORKFLOW
-    assert "Fail if selected provider failed without fallback" in WORKFLOW
-
-
-def test_controller_runs_before_provider_actions():
-    controller = WORKFLOW.index("Select first authorized provider")
-    gemini = WORKFLOW.index("Run Career OS cycle with Gemini")
-    fallback = WORKFLOW.index("Select fallback after Gemini failure")
-    codex = WORKFLOW.index("Run fallback Career OS cycle with Codex")
-    assert controller < gemini < fallback < codex
+def test_native_smoke_publishes_result_without_submission():
+    assert "native-smoke-result.json" in WORKFLOW
+    assert "actions/upload-artifact@v4" in WORKFLOW
+    assert "submit" not in WORKFLOW.lower()
