@@ -61,7 +61,7 @@ class InterviewCoach:
                     question_type=InterviewQuestionType.TECHNICAL,
                     competency=requirement,
                     difficulty=2,
-                    evidence_basis=[c.claim_id for c in evidence[:3]],
+                    evidence_basis=[],
                     follow_ups=[
                         "What was the problem you were solving?",
                         "What was your specific contribution?",
@@ -138,7 +138,13 @@ class InterviewCoach:
         specificity = 5 if any(marker in answer.casefold() for marker in ("because", "by ", "using ", "when ")) else 3
         evidence = 5 if evidence_used else 1
         clarity = 5 if len(answer.strip().split()) <= 180 else 3
-        score = AnswerScore(relevance, structure, specificity, evidence, clarity)
+        score = AnswerScore(
+            relevance=relevance,
+            structure=structure,
+            specificity=specificity,
+            evidence=evidence,
+            clarity=clarity,
+        )
 
         gaps: list[str] = []
         coaching: list[str] = []
