@@ -39,6 +39,8 @@ def main() -> int:
     failure = subparsers.add_parser("failure")
     failure.add_argument("--provider", required=True)
     failure.add_argument("--message", required=True)
+    failure.add_argument("--model")
+    failure.add_argument("--timestamp")
     args = parser.parse_args()
 
     controller = _controller()
@@ -48,7 +50,13 @@ def main() -> int:
         return 0
 
     next_provider = controller.record_provider_failure(
-        ProviderFailure(args.provider, classify_provider_failure(args.message), args.message)
+        ProviderFailure(
+            args.provider,
+            classify_provider_failure(args.message),
+            args.message,
+            model=args.model,
+            timestamp=args.timestamp,
+        )
     )
     _set_output("provider", next_provider or "")
     return 0

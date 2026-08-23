@@ -30,3 +30,11 @@ Focused pipeline tests pass locally. The full local suite has one environment-on
 ## Remaining work
 
 The next cycle should run the checkpointed pipeline and continue any unfinished department. Each feature must follow research, implementation, deterministic tests, exact-head CI, external merge, main verification, and post-merge execution. Consequential application submission remains approval-gated.
+
+## Autonomous audit and provider recovery enhancement
+
+The declared departments are implemented as deterministic modules and have dedicated tests: Job Scout, JD Intelligence, Evidence Analysis, Fit Scoring, Resume Tailoring, Resume Rendering, ATS Audit, Recruiter Review, Application Management, Interview Coach, Learning, and Orchestration. Real provider-backed execution remains unverified for department work because Gemini and Codex are quota-blocked; the controller correctly records `PROVIDER_BLOCKED`.
+
+The controller now classifies configuration failures separately from authorization failures, persists provider, model, timestamp, failure kind, and retry eligibility, applies bounded cooldowns for quota/rate-limit/temporary/outage/model-unavailable failures, preserves department and phase state, and avoids repeated requests while a provider is in cooldown. Unknown and authorization/configuration failures are not automatically retried. The workflow remains provider-neutral, research-first, sandboxed, least-privilege, and merge-boundary safe.
+
+Focused recovery tests pass. The full local suite is otherwise green except for the known environment-only Playwright Chromium executable absence; GitHub CI installs Chromium. Remaining work is to verify the recovery behavior in GitHub Actions and run a genuine provider-backed department cycle when an authorized provider has available quota.
