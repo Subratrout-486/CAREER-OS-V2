@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Provider-free smoke test for one real public job posting.
-
-The test intentionally uses only standard-library HTTP/HTML parsing plus the
-existing deterministic Career OS pipeline. No Gemini, Codex, API key, or ATS
-credential is required. It fetches one public posting, extracts JobPosting
-JSON-LD when available, and runs the same JD/evidence/fit/resume/ATS/readiness
-stages used by Career OS.
-"""
+"""Provider-free smoke test for one real public job posting."""
 from __future__ import annotations
 
 import argparse
@@ -14,15 +7,11 @@ import json
 import re
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from career_os.candidate_profile import load_candidate_source_of_truth
-from career_os.models.evidence import (
-    EvidenceClaim,
-    EvidenceKind,
-    EvidenceSource,
-    SupportStatus,
-)
+from career_os.models.evidence import EvidenceClaim, EvidenceKind, EvidenceSource, SupportStatus
 from career_os.models.resume import ResumeBullet, ResumeProfile
 from career_os.pipeline import CareerPipeline
 
@@ -32,6 +21,7 @@ class _HTMLText(HTMLParser):
         super().__init__()
         self.parts: list[str] = []
         self.json_ld: list[str] = []
+        self.meta: dict[str, str] = {}
         self._script_type = ""
         self._in_script = False
         self._title = ""
@@ -44,6 +34,11 @@ class _HTMLText(HTMLParser):
             self._script_type = (attrs_map.get("type") or "").casefold()
         elif tag == "title":
             self._in_title = True
+        elif tag == "meta":
+            key = attrs_map.get("property") or attrs_map.get("name")
+            value = attrs_map.get("content")
+            if key and value:
+                self.meta[key.casefold()] = value.strip()
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "script":
@@ -64,10 +59,7 @@ class _HTMLText(HTMLParser):
 
 
 def _fetch(url: str) -> str:
-    request = Request(url, headers={
-        "User-Agent": "Career-OS-V2-native-smoke/1.0",
-        "Accept": "text/html,application/xhtml+xml",
-    })
+    request = Request(url, headers={"User-Agent": "Career-OS-V2-native-smoke/1.1", "Accept": "text/html,application/xhtml+xml"})
     with urlopen(request, timeout=25) as response:
         return response.read(8_000_000).decode("utf-8", errors="replace")
 
@@ -82,7 +74,8 @@ def _job_posting(parser: _HTMLText) -> dict[str, object]:
         for item in candidates:
             if not isinstance(item, dict):
                 continue
-            if item.get("@type") == "JobPosting" or "JobPosting" in item.get("@type", []):
+            types = item.get("@type", [])
+            if types == "JobPosting" or "JobPosting" in (types if isinstance(types, list) else []):
                 return item
     return {}
 
@@ -99,6 +92,26 @@ def _location(value: object) -> str | None:
         values = [_location(item) for item in value]
         return "; ".join(x for x in values if x) or None
     return None
+
+
+def _company(posting: dict[str, object], parser: _HTMLText, source_url: str, title: str) -> str | None:
+    org = posting.get("hiringOrganization")
+    if isinstance(org, dict) and org.get("name"):
+        return str(org["name"]).strip()
+    for key in ("og:site_name", "application-name", "author"):
+        if parser.meta.get(key):
+            return parser.meta[key]
+    # SAP/SuccessFactors pages frequently put the employer in the HTML title even
+    # when JobPosting JSON-LD omits hiringOrganization.
+    if " | " in title:
+        suffix = title.rsplit(" | ", 1)[-1].strip()
+        if suffix and "job details" not in suffix.casefold():
+            return suffix
+    host = urlparse(source_url).hostname or ""
+    if host.startswith("careers."):
+        host = host[len("careers."):]
+    label = host.split(".", 1)[0].replace("-", " ").strip()
+    return label.title() or None
 
 
 def _claims(profile: dict[str, object]) -> tuple[list[EvidenceClaim], ResumeProfile]:
@@ -123,6 +136,23 @@ def _claims(profile: dict[str, object]) -> tuple[list[EvidenceClaim], ResumeProf
             claims.append(EvidenceClaim(claim_id, claim, EvidenceKind.VERIFIED, SupportStatus.SUPPORTED, 1.0, source))
             bullets.append(ResumeBullet(str(detail), (claim_id,)))
 
+    # Education and the canonical skill inventory are evidence too. They are not
+    # employment claims, but excluding them causes valid degree/skill requirements
+    # to be falsely classified as hard gaps.
+    for index, education in enumerate(profile.get("education", [])):
+        qualification = str(education.get("qualification", ""))
+        institution = str(education.get("institution", ""))
+        claim_id = f"education-{index}"
+        claim = f"Education: {qualification} — {institution}"
+        claims.append(EvidenceClaim(claim_id, claim, EvidenceKind.VERIFIED, SupportStatus.SUPPORTED, 1.0, source))
+
+    skills = profile.get("skills_and_tools", {})
+    for category, values in skills.items():
+        for index, skill in enumerate(values if isinstance(values, list) else []):
+            claim_id = f"skill-{category}-{index}"
+            claim = f"{category}: {skill}"
+            claims.append(EvidenceClaim(claim_id, claim, EvidenceKind.VERIFIED, SupportStatus.SUPPORTED, 1.0, source))
+
     summary = str(profile["candidate"]["professional_summary"])
     return claims, ResumeProfile(summary=summary, bullets=tuple(bullets))
 
@@ -140,27 +170,17 @@ def main() -> int:
 
     title = str(posting.get("title") or parser_html._title.strip())
     description = str(posting.get("description") or "\n".join(parser_html.parts))
-    company_data = posting.get("hiringOrganization")
-    company = company_data.get("name") if isinstance(company_data, dict) else None
+    company = _company(posting, parser_html, args.url, title)
     location = _location(posting.get("jobLocation"))
     if not location:
         match = re.search(r"Hyderabad[^\n]{0,80}", "\n".join(parser_html.parts), re.I)
         location = match.group(0).strip() if match else None
-
     if not title or not description:
         raise RuntimeError("Could not extract a usable title and job description from the public posting")
 
     profile = load_candidate_source_of_truth()
     claims, resume = _claims(profile)
-    raw_job = {
-        "company": company or "Unknown employer",
-        "title": title,
-        "location": location,
-        "source_url": args.url,
-        "source": "official career page",
-        "description": description,
-        "posted_at": posting.get("datePosted") or posting.get("dateModified"),
-    }
+    raw_job = {"company": company or "Unknown employer", "title": title, "location": location, "source_url": args.url, "source": "official career page", "description": description, "posted_at": posting.get("datePosted") or posting.get("dateModified")}
 
     run_id = "native-smoke-" + re.sub(r"[^a-z0-9]+", "-", title.casefold()).strip("-")[:70]
     pipeline = CareerPipeline(Path(".career-os/native-smoke-checkpoint.json"))
