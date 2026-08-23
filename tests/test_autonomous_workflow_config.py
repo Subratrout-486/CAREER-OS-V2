@@ -9,8 +9,9 @@ WORKFLOW = (
 def test_autonomous_workflow_uses_pinned_official_gemini_action_safely():
     assert "google-github-actions/run-gemini-cli@f77273f4c914e4bf38440cf36a0369cb64a37489" in WORKFLOW
     assert "gemini_api_key: ${{ secrets.GEMINI_API_KEY }}" in WORKFLOW
-    assert 'gemini_cli_version: "0.1.22"' in WORKFLOW
+    assert 'gemini_cli_version: "preview"' in WORKFLOW
     assert 'GEMINI_CLI_TRUST_WORKSPACE: "true"' in WORKFLOW
+    assert '"sandbox": "docker"' in WORKFLOW
     assert 'persist-credentials: false' in WORKFLOW
     assert "danger-full-access" not in WORKFLOW
     assert "--full-auto" not in WORKFLOW

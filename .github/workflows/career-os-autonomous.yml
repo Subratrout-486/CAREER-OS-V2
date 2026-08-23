@@ -43,7 +43,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-          gemini_cli_version: "0.1.22"
+          gemini_cli_version: "preview"
           gemini_debug: false
           upload_artifacts: false
           workflow_name: "career-os-autonomous"
@@ -81,5 +81,8 @@ jobs:
             {
               "model": {
                 "maxSessionTurns": 25
+              },
+              "tools": {
+                "sandbox": "docker"
               }
             }
