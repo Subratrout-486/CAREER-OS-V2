@@ -7,11 +7,12 @@ kept outside this module so an adapter can never merge a PR or bypass CI on its 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 import json
 from pathlib import Path
 import tempfile
-from typing import Iterable, Mapping
+from typing import Iterable
 
 
 class ProviderFailureKind(StrEnum):
@@ -21,6 +22,7 @@ class ProviderFailureKind(StrEnum):
     OUTAGE = "outage"
     MODEL_UNAVAILABLE = "model_unavailable"
     AUTHORIZATION = "authorization"
+    CONFIGURATION = "configuration"
     UNKNOWN = "unknown"
 
 
@@ -37,6 +39,7 @@ class DepartmentState:
     provider: str | None = None
     attempts: int = 0
     provider_failures: dict[str, list[str]] = field(default_factory=dict)
+    failure_metadata: dict[str, list[dict[str, str | None]]] = field(default_factory=dict)
     last_error: str | None = None
     status: ControllerStatus = ControllerStatus.READY
 
@@ -54,6 +57,9 @@ class ProviderFailure:
     provider: str
     kind: ProviderFailureKind
     message: str
+    model: str | None = None
+    timestamp: str | None = None
+    retry_after: str | None = None
 
 
 @dataclass(frozen=True)
@@ -63,16 +69,29 @@ class ProviderBlockedHandoff:
     attempted_providers: tuple[str, ...]
     last_failure: str
     next_action: str
+    failure_kind: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    retry_after: str | None = None
 
 
 _FAILURE_PATTERNS: tuple[tuple[ProviderFailureKind, tuple[str, ...]], ...] = (
     (ProviderFailureKind.QUOTA, ("quota", "exhausted", "billing details")),
     (ProviderFailureKind.RATE_LIMIT, ("rate limit", "too many requests", "429")),
-    (ProviderFailureKind.MODEL_UNAVAILABLE, ("model unavailable", "model_not_found", "not found")),
+    (ProviderFailureKind.MODEL_UNAVAILABLE, ("model unavailable", "model_not_found", "model not found")),
     (ProviderFailureKind.OUTAGE, ("service unavailable", "temporarily unavailable", "outage", "503")),
     (ProviderFailureKind.AUTHORIZATION, ("unauthorized", "forbidden", "invalid api key", "401", "403")),
+    (ProviderFailureKind.CONFIGURATION, ("invalid configuration", "configuration error", "unsupported argument", "unknown arguments")),
     (ProviderFailureKind.TEMPORARY, ("timeout", "connection reset", "temporary", "502", "504")),
 )
+
+_RETRY_DELAYS = {
+    ProviderFailureKind.QUOTA: timedelta(hours=24),
+    ProviderFailureKind.RATE_LIMIT: timedelta(minutes=15),
+    ProviderFailureKind.TEMPORARY: timedelta(minutes=10),
+    ProviderFailureKind.OUTAGE: timedelta(minutes=30),
+    ProviderFailureKind.MODEL_UNAVAILABLE: timedelta(hours=1),
+}
 
 
 def classify_provider_failure(message: str) -> ProviderFailureKind:
@@ -82,6 +101,24 @@ def classify_provider_failure(message: str) -> ProviderFailureKind:
         if any(pattern in normalized for pattern in patterns):
             return kind
     return ProviderFailureKind.UNKNOWN
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _parse_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _retry_at(kind: ProviderFailureKind, timestamp: datetime) -> str | None:
+    delay = _RETRY_DELAYS.get(kind)
+    return (timestamp + delay).isoformat().replace("+00:00", "Z") if delay else None
 
 
 class ProviderController:
@@ -105,16 +142,26 @@ class ProviderController:
         self._save()
         return self.state.department_state
 
-    def choose_provider(self) -> str | None:
+    def choose_provider(self, now: datetime | None = None) -> str | None:
         if self.state is None or self.state.department_state is None:
             raise RuntimeError("call start() before choosing a provider")
-        attempted = set(self.state.department_state.provider_failures)
+        current = self.state.department_state
+        instant = now or _utc_now()
         for provider in self.providers:
-            if provider not in attempted:
-                self.state.department_state.provider = provider
-                self._save()
-                return provider
-        self.state.department_state.status = ControllerStatus.PROVIDER_BLOCKED
+            metadata = current.failure_metadata.get(provider, [])
+            if metadata:
+                retry_at = _parse_timestamp(metadata[-1].get("retry_after"))
+                if retry_at is None or instant < retry_at:
+                    continue
+            elif provider in current.provider_failures:
+                # Legacy state has no retry metadata; do not spin on it automatically.
+                continue
+            current.provider = provider
+            current.status = ControllerStatus.READY
+            self._save()
+            return provider
+        current.provider = None
+        current.status = ControllerStatus.PROVIDER_BLOCKED
         self._save()
         return None
 
@@ -127,8 +174,18 @@ class ProviderController:
         current.attempts += 1
         current.last_error = failure.message
         current.provider_failures.setdefault(failure.provider, []).append(failure.kind.value)
+        observed_at = _parse_timestamp(failure.timestamp) or _utc_now()
+        retry_after = failure.retry_after or _retry_at(failure.kind, observed_at)
+        current.failure_metadata.setdefault(failure.provider, []).append(
+            {
+                "kind": failure.kind.value,
+                "model": failure.model,
+                "timestamp": observed_at.isoformat().replace("+00:00", "Z"),
+                "retry_after": retry_after,
+            }
+        )
         current.provider = None
-        next_provider = self.choose_provider()
+        next_provider = self.choose_provider(now=observed_at)
         if next_provider is None:
             current.status = ControllerStatus.PROVIDER_BLOCKED
         self._save()
@@ -140,12 +197,26 @@ class ProviderController:
         current = self.state.department_state
         if current.status is not ControllerStatus.PROVIDER_BLOCKED:
             return None
+        provider = None
+        kind = None
+        model = None
+        retry_after = None
+        if current.failure_metadata:
+            provider = next(reversed(current.failure_metadata))
+            latest = current.failure_metadata[provider][-1]
+            kind = latest.get("kind")
+            model = latest.get("model")
+            retry_after = latest.get("retry_after")
         return ProviderBlockedHandoff(
             status=ControllerStatus.PROVIDER_BLOCKED.value,
             department=current.department,
             attempted_providers=tuple(current.provider_failures),
             last_failure=current.last_error or "provider failure without message",
             next_action="Authorize another provider or restore an existing provider quota; no credential is created automatically.",
+            failure_kind=kind,
+            provider=provider,
+            model=model,
+            retry_after=retry_after,
         )
 
     def advance_department(self) -> DepartmentState | None:
@@ -179,6 +250,8 @@ class ProviderController:
             return None
         raw = json.loads(self.state_path.read_text())
         department = raw.get("department_state")
+        if department:
+            department.setdefault("failure_metadata", {})
         return ControllerState(
             current_department=raw["current_department"],
             departments=list(raw["departments"]),

@@ -1,4 +1,6 @@
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
 
 import pytest
 
@@ -50,6 +52,42 @@ def test_controller_emits_provider_blocked_after_all_authorized_providers_fail(t
     assert handoff.department == "research"
     assert handoff.attempted_providers == ("gemini", "codex")
     assert "Authorize another provider" in handoff.next_action
+
+
+def test_failure_metadata_persists_model_timestamp_and_retry_window(tmp_path: Path):
+    state_path = tmp_path / "controller.json"
+    controller = ProviderController(state_path, ["gemini", "codex"])
+    controller.start(["research"])
+    controller.choose_provider()
+    observed = datetime(2026, 8, 23, 7, 0, tzinfo=timezone.utc)
+    controller.record_provider_failure(
+        ProviderFailure(
+            "gemini",
+            ProviderFailureKind.QUOTA,
+            "daily quota exhausted",
+            model="gemini-3.5-flash",
+            timestamp=observed.isoformat(),
+        )
+    )
+    restored = ProviderController(state_path, ["gemini", "codex"])
+    metadata = restored.state.department_state.failure_metadata["gemini"][-1]
+    assert metadata["model"] == "gemini-3.5-flash"
+    assert metadata["timestamp"] == observed.isoformat().replace("+00:00", "Z")
+    assert metadata["retry_after"] == "2026-08-24T07:00:00Z"
+
+
+def test_quota_cooldown_suppresses_repeated_provider_until_eligible(tmp_path: Path):
+    state_path = tmp_path / "controller.json"
+    controller = ProviderController(state_path, ["gemini"])
+    controller.start(["research"])
+    controller.choose_provider()
+    observed = datetime(2026, 8, 23, 7, 0, tzinfo=timezone.utc)
+    controller.record_provider_failure(
+        ProviderFailure("gemini", ProviderFailureKind.QUOTA, "quota exhausted", timestamp=observed.isoformat())
+    )
+    assert controller.choose_provider(now=observed + timedelta(hours=1)) is None
+    assert controller.state.department_state.status is ControllerStatus.PROVIDER_BLOCKED
+    assert controller.choose_provider(now=observed + timedelta(hours=24, seconds=1)) == "gemini"
 
 
 def test_department_cannot_advance_before_ready_to_merge(tmp_path: Path):

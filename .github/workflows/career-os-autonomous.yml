@@ -99,9 +99,13 @@ jobs:
           PROVIDER_FAILURE_MESSAGE: ${{ steps.gemini.outputs.gemini_errors || 'Gemini provider action failed; inspect this run for the provider error.' }}
         run: |
           set -euo pipefail
+          provider_model="$(printf '%s' "$PROVIDER_FAILURE_MESSAGE" | grep -oE 'model: [A-Za-z0-9._-]+' | head -1 | sed 's/^model: //' || true)"
+          provider_model="${provider_model:-unknown}"
           python scripts/career_os_provider_controller.py failure \
             --provider gemini \
-            --message "$PROVIDER_FAILURE_MESSAGE"
+            --message "$PROVIDER_FAILURE_MESSAGE" \
+            --model "$provider_model" \
+            --timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
       - name: Run fallback Career OS cycle with Codex
         id: codex
@@ -126,7 +130,9 @@ jobs:
           set -euo pipefail
           python scripts/career_os_provider_controller.py failure \
             --provider codex \
-            --message "$PROVIDER_FAILURE_MESSAGE"
+            --message "$PROVIDER_FAILURE_MESSAGE" \
+            --model "${CAREER_OS_CODEX_MODEL:-unknown}" \
+            --timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
       - name: Publish provider-blocked handoff
         if: always() && hashFiles('.career-os/provider-state.json') != ''
