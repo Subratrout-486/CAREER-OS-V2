@@ -35,6 +35,14 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Trust checked-out workspace for headless Gemini
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.gemini"
+          printf '{"%s":"TRUST_FOLDER"}\n' "$GITHUB_WORKSPACE" > "$HOME/.gemini/trustedFolders.json"
+          chmod 600 "$HOME/.gemini/trustedFolders.json"
+
       - name: Run Career OS autonomous coding cycle with Gemini
         id: gemini
         uses: google-github-actions/run-gemini-cli@f77273f4c914e4bf38440cf36a0369cb64a37489 # v0.1.22

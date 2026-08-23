@@ -12,6 +12,9 @@ def test_autonomous_workflow_uses_pinned_official_gemini_action_safely():
     assert 'gemini_cli_version: "preview"' in WORKFLOW
     assert 'GEMINI_CLI_TRUST_WORKSPACE: "true"' in WORKFLOW
     assert '"sandbox": "docker"' in WORKFLOW
+    assert "Trust checked-out workspace for headless Gemini" in WORKFLOW
+    assert 'trustedFolders.json' in WORKFLOW
+    assert 'chmod 600' in WORKFLOW
     assert 'persist-credentials: false' in WORKFLOW
     assert "danger-full-access" not in WORKFLOW
     assert "--full-auto" not in WORKFLOW
