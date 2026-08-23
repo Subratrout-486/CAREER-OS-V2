@@ -62,8 +62,8 @@ jobs:
             6. Create/update a PR rather than writing directly to main.
             7. Dispatch the repository CI workflow explicitly for the exact head when needed using workflow_dispatch, then inspect its result.
             8. If CI fails, research the actual failure, implement a fix, and repeat verification. Do not weaken or remove tests to manufacture a green result.
-            9. Merge only after exact-head CI is green and the change is within the autonomous scope.
-            10. After a successful merge, record the next eligible department so the next scheduled/CI-triggered cycle can continue.
+            9. NEVER merge a PR. When a PR is fully verified, hand it to the external merge operator by adding a concise PR comment beginning with `READY_TO_MERGE` and including the exact PR number, exact head SHA, and CI run URL. If a suitable human-required tracking issue already exists, update it; otherwise create one titled `HUMAN_REQUIRED: Merge PR #<number>`.
+            10. After a merge is detected, record the next eligible department so the next CI-triggered cycle can continue.
 
             Important:
             - Never claim success without an actual successful exact-head CI result.
@@ -71,6 +71,7 @@ jobs:
             - Never submit a real job application, accept external terms, spend money, or perform another consequential external action. Those require human approval.
             - If the current blocker genuinely requires the owner (credential, OAuth/consent, missing personal fact, legal/financial decision), record HUMAN_REQUIRED with the exact action needed and stop this cycle.
             - If no change is needed, record a concise NOOP reason instead of creating noise.
+            - Do not repeatedly reopen or recreate an already verified PR.
 
             The goal is to make measurable progress, not to produce a report. Prefer implementation and verification over commentary.
 
