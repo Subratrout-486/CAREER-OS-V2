@@ -43,8 +43,30 @@ jobs:
           printf '{"%s":"TRUST_FOLDER"}\n' "$GITHUB_WORKSPACE" > "$HOME/.gemini/trustedFolders.json"
           chmod 600 "$HOME/.gemini/trustedFolders.json"
 
-      - name: Run Career OS autonomous coding cycle with Gemini
+      - name: Select first authorized provider
+        id: controller
+        shell: bash
+        env:
+          PYTHONPATH: src
+          CAREER_OS_STATE: .career-os/provider-state.json
+          HAS_GEMINI_KEY: ${{ secrets.GEMINI_API_KEY != '' }}
+          HAS_OPENAI_KEY: ${{ secrets.OPENAI_API_KEY != '' }}
+        run: |
+          set -euo pipefail
+          providers=""
+          [[ "$HAS_GEMINI_KEY" == true ]] && providers="gemini"
+          [[ "$HAS_OPENAI_KEY" == true ]] && providers="${providers:+$providers,}codex"
+          if [[ -z "$providers" ]]; then
+            echo "No authorized provider secret is configured." >&2
+            exit 1
+          fi
+          CAREER_OS_PROVIDERS="$providers" python scripts/career_os_provider_controller.py start --departments "current" \
+            || { echo "Provider controller could not initialize." >&2; exit 1; }
+
+      - name: Run Career OS cycle with Gemini
         id: gemini
+        if: steps.controller.outputs.provider == 'gemini'
+        continue-on-error: true
         uses: google-github-actions/run-gemini-cli@f77273f4c914e4bf38440cf36a0369cb64a37489 # v0.1.22
         env:
           GEMINI_CLI_TRUST_WORKSPACE: "true"
@@ -55,36 +77,7 @@ jobs:
           gemini_debug: false
           upload_artifacts: false
           workflow_name: "career-os-autonomous"
-          prompt: |
-            You are the autonomous Career OS V2 development agent.
-
-            Read .career-os/AUTONOMOUS_LOOP.md before doing anything.
-            Inspect the current repository, open PRs, recent CI runs, and current department state.
-
-            Execute ONE bounded autonomous cycle. Do not wait for the repository owner to say "proceed".
-
-            Mandatory method:
-            1. Research relevant existing GitHub repositories and web solutions for the current problem.
-            2. Compare alternatives and choose the best proven pattern that fits this repository.
-            3. Implement the smallest coherent change.
-            4. Add/update deterministic regression tests.
-            5. Run tests locally when practical.
-            6. Create/update a PR rather than writing directly to main.
-            7. Dispatch the repository CI workflow explicitly for the exact head when needed using workflow_dispatch, then inspect its result.
-            8. If CI fails, research the actual failure, implement a fix, and repeat verification. Do not weaken or remove tests to manufacture a green result.
-            9. NEVER merge a PR. When a PR is fully verified, add a concise PR comment beginning with READY_TO_MERGE and including the exact PR number, exact head SHA, and CI run URL. If a suitable human-required tracking issue already exists, update it; otherwise create one titled HUMAN_REQUIRED: Merge PR #<number>.
-            10. After a merge is detected, record the next eligible department so the next CI-triggered cycle can continue.
-
-            Important:
-            - Never claim success without an actual successful exact-head CI result.
-            - Never silently resolve conflicting user evidence; use the Evidence Ledger/conflict gates.
-            - Never submit a real job application, accept external terms, spend money, or perform another consequential external action. Those require human approval.
-            - If the current blocker genuinely requires the owner (credential, OAuth/consent, missing personal fact, legal/financial decision), record HUMAN_REQUIRED with the exact action needed and stop this cycle.
-            - If no change is needed, record a concise NOOP reason instead of creating noise.
-            - Do not repeatedly reopen or recreate an already verified PR.
-
-            The goal is to make measurable progress, not to produce a report. Prefer implementation and verification over commentary.
-
+          prompt-file: .career-os/AUTONOMOUS_AGENT_PROMPT.md
           settings: |-
             {
               "model": {
@@ -94,3 +87,62 @@ jobs:
                 "sandbox": "docker"
               }
             }
+
+      - name: Select fallback after Gemini failure
+        id: fallback
+        if: steps.controller.outputs.provider == 'gemini' && steps.gemini.outcome == 'failure'
+        shell: bash
+        env:
+          PYTHONPATH: src
+          CAREER_OS_STATE: .career-os/provider-state.json
+          CAREER_OS_PROVIDERS: gemini,codex
+          PROVIDER_FAILURE_MESSAGE: ${{ steps.gemini.outputs.gemini_errors || 'Gemini provider action failed; inspect this run for the provider error.' }}
+        run: |
+          set -euo pipefail
+          python scripts/career_os_provider_controller.py failure \
+            --provider gemini \
+            --message "$PROVIDER_FAILURE_MESSAGE"
+
+      - name: Run fallback Career OS cycle with Codex
+        id: codex
+        if: steps.fallback.outputs.provider == 'codex'
+        continue-on-error: true
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ":workspace"
+          safety-strategy: drop-sudo
+          prompt-file: .career-os/AUTONOMOUS_AGENT_PROMPT.md
+
+      - name: Record fallback provider failure
+        if: steps.fallback.outputs.provider == 'codex' && steps.codex.outcome == 'failure'
+        shell: bash
+        env:
+          PYTHONPATH: src
+          CAREER_OS_STATE: .career-os/provider-state.json
+          CAREER_OS_PROVIDERS: gemini,codex
+          PROVIDER_FAILURE_MESSAGE: "Codex provider action failed; inspect this run for the provider error."
+        run: |
+          set -euo pipefail
+          python scripts/career_os_provider_controller.py failure \
+            --provider codex \
+            --message "$PROVIDER_FAILURE_MESSAGE"
+
+      - name: Publish provider-blocked handoff
+        if: always() && hashFiles('.career-os/provider-state.json') != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -q '"status": "provider_blocked"' .career-os/provider-state.json; then
+            {
+              echo '## PROVIDER_BLOCKED'
+              echo
+              echo 'No already-authorized provider remains for the current department.'
+              echo 'The controller preserved the department state and requires provider recovery or another authorized provider.'
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+      - name: Fail if selected provider failed without fallback
+        if: steps.controller.outputs.provider == 'gemini' && steps.gemini.outcome == 'failure' && steps.fallback.outputs.provider != 'codex'
+        run: exit 1
