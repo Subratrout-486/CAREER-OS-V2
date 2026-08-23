@@ -47,3 +47,10 @@ Research was performed against `sickn33/agentic-awesome-skills` (the requested a
 These four skills were implemented as reviewed local instruction files with no executable payloads. The autonomous prompt now requires the curated set and explicitly forbids external catalog installation. The manifest records provenance, exclusions, safety rules, and acceptance criteria. Providers, credentials, sandbox settings, and the provider controller were not changed.
 
 Focused curated-skill and workflow tests pass: 13 passed. The full deterministic suite excluding the environment-dependent PDF browser test passes: 190 passed. The complete local suite still has the known Playwright Chromium executable absence; this is an environment limitation, not a curated-skill failure. The branch is ready for CI validation; no merge is authorized until exact-head CI is green.
+
+
+## Application Management safety hardening
+
+With provider-dependent work blocked, Application Management was selected as the highest-value unblocked department because it guards consequential external submission. Research covered GitHub environment approval gates, AWS Step Functions human approval, and Temporal idempotency guidance. The existing state machine already required explicit approval and confirmation evidence; the concrete gap was that whitespace-only evidence was accepted as a submission confirmation.
+
+A test-first regression was added and confirmed red before implementation. The transition guard now rejects missing or whitespace-only submission evidence without recording a state transition. Focused Application Management tests pass, and the full deterministic suite has 211 passing tests with only the known local Playwright Chromium executable limitation in the PDF rendering test. The change is ready for dedicated-branch PR and exact-head CI verification; no provider, credential, sandbox, or merge-boundary changes were made.

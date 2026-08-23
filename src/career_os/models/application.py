@@ -52,7 +52,7 @@ class ApplicationRecord(BaseModel):
     ) -> ApplicationEvent:
         if to_status == self.status:
             raise ValueError(f"Application is already {self.status}")
-        if to_status == ApplicationStatus.SUBMITTED and not evidence:
+        if to_status == ApplicationStatus.SUBMITTED and (not evidence or not evidence.strip()):
             raise ValueError("A confirmed submission requires evidence")
         if self.status in {ApplicationStatus.REJECTED, ApplicationStatus.WITHDRAWN, ApplicationStatus.CLOSED}:
             raise ValueError(f"Cannot transition a terminal application from {self.status}")

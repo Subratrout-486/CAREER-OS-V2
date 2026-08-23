@@ -28,6 +28,20 @@ def test_manager_requires_clean_readiness_before_approval():
     assert not manager.is_submission_ready(app)
 
 
+def test_submission_confirmation_requires_nonblank_evidence():
+    manager = ApplicationManager()
+    app = manager.create(make_job(), resume_version="resume-v1")
+    manager.mark_ready(app)
+    manager.approve(app, note="User approved submission")
+
+    try:
+        manager.confirm_submission(app, confirmation_evidence="   ")
+    except ValueError as exc:
+        assert str(exc) == "A confirmed submission requires evidence"
+    else:
+        raise AssertionError("Whitespace-only confirmation evidence must be rejected")
+
+
 def test_manager_requires_explicit_approval_before_submission():
     manager = ApplicationManager()
     app = manager.create(make_job(), resume_version="resume-v1")
