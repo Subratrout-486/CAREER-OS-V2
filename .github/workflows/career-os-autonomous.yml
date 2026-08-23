@@ -41,10 +41,7 @@ jobs:
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           safety-strategy: drop-sudo
-          permission-profile: workspace-write
-          codex-args: >-
-            --full-auto
-            --skip-git-repo-check
+          permission-profile: ":workspace"
           prompt: |
             You are the autonomous Career OS V2 development agent.
 
