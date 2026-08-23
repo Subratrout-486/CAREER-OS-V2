@@ -35,13 +35,18 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Run Career OS autonomous coding cycle
-        id: codex
-        uses: openai/codex-action@v1
+      - name: Run Career OS autonomous coding cycle with Gemini
+        id: gemini
+        uses: google-github-actions/run-gemini-cli@f77273f4c914e4bf38440cf36a0369cb64a37489 # v0.1.22
+        env:
+          GEMINI_CLI_TRUST_WORKSPACE: "true"
+          GITHUB_TOKEN: ${{ github.token }}
         with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          safety-strategy: drop-sudo
-          permission-profile: ":workspace"
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          gemini_cli_version: "0.1.22"
+          gemini_debug: false
+          upload_artifacts: false
+          workflow_name: "career-os-autonomous"
           prompt: |
             You are the autonomous Career OS V2 development agent.
 
@@ -72,5 +77,9 @@ jobs:
 
             The goal is to make measurable progress, not to produce a report. Prefer implementation and verification over commentary.
 
-        env:
-          GH_TOKEN: ${{ github.token }}
+          settings: |-
+            {
+              "model": {
+                "maxSessionTurns": 25
+              }
+            }
