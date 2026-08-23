@@ -2,63 +2,40 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = (ROOT / ".github" / "workflows" / "career-os-autonomous.yml").read_text()
-PROMPT = (ROOT / ".career-os" / "AUTONOMOUS_AGENT_PROMPT.md").read_text()
 
 
-def test_autonomous_workflow_uses_supported_provider_adapters_safely():
-    assert "google-github-actions/run-gemini-cli@387c8ddb7a72078825da941758b811b9153c71e8" in WORKFLOW
-    assert "openai/codex-action@v1" in WORKFLOW
-    assert "gemini_api_key: ${{ secrets.GEMINI_API_KEY }}" in WORKFLOW
-    assert "openai-api-key: ${{ secrets.OPENAI_API_KEY }}" in WORKFLOW
-    assert 'gemini_cli_version: "0.55.1"' in WORKFLOW
-    assert 'GEMINI_CLI_TRUST_WORKSPACE: "true"' in WORKFLOW
-    assert '"sandbox": "docker"' in WORKFLOW
-    assert 'permission-profile: ":workspace"' in WORKFLOW
-    assert "safety-strategy: drop-sudo" in WORKFLOW
-    assert 'persist-credentials: false' in WORKFLOW
+def test_autonomous_workflow_is_provider_free():
+    assert "run-gemini-cli" not in WORKFLOW
+    assert "codex-action" not in WORKFLOW
+    assert "GEMINI_API_KEY" not in WORKFLOW
+    assert "OPENAI_API_KEY" not in WORKFLOW
+    assert "career_os_automation.py" in WORKFLOW
+    assert "config/public_ats_sources.json" in WORKFLOW
+    assert "candidate/source_of_truth.json" in WORKFLOW
+
+
+def test_autonomous_workflow_runs_deterministic_verification_first():
+    install = WORKFLOW.index("Install Career OS")
+    tests = WORKFLOW.index("Run deterministic test suite")
+    automation = WORKFLOW.index("Run provider-free Career OS automation")
+    summary = WORKFLOW.index("Publish automation summary")
+    assert install < tests < automation < summary
+
+
+def test_autonomous_workflow_has_minimum_permissions_and_no_agent_shell_escape():
+    assert "contents: read" in WORKFLOW
+    assert "contents: write" not in WORKFLOW
+    assert "pull-requests: write" not in WORKFLOW
+    assert "issues: write" not in WORKFLOW
+    assert "persist-credentials: false" in WORKFLOW
     assert "danger-full-access" not in WORKFLOW
     assert "--full-auto" not in WORKFLOW
     assert "--sandbox" not in WORKFLOW
 
 
-def test_gemini_prompt_uses_supported_file_injection_and_real_error_output():
-    assert 'prompt: "@.career-os/AUTONOMOUS_AGENT_PROMPT.md"' in WORKFLOW
-    assert "prompt-file: .career-os/AUTONOMOUS_AGENT_PROMPT.md" in WORKFLOW
-    assert "steps.gemini.outputs.error" in WORKFLOW
-    assert "steps.gemini.outputs.gemini_errors" not in WORKFLOW
-
-
-def test_autonomous_workflow_preserves_external_merge_handoff():
-    assert "pull-requests: write" in WORKFLOW
-    assert "issues: write" in WORKFLOW
-    assert "NEVER merge a PR" in PROMPT
-    assert "READY_TO_MERGE" in PROMPT
-    assert "exact PR number, exact head SHA, and CI run URL" in PROMPT
-    assert "HUMAN_REQUIRED" in PROMPT
-    assert "PROVIDER_BLOCKED" in PROMPT
-    assert "workflow_run" in WORKFLOW
+def test_autonomous_workflow_is_scheduled_and_auditable():
     assert "schedule:" in WORKFLOW
-
-
-def test_autonomous_workflow_preserves_research_first_sequence():
-    research = PROMPT.index("1. Research relevant")
-    implement = PROMPT.index("3. Implement")
-    tests = PROMPT.index("4. Add or update deterministic")
-    pr = PROMPT.index("6. Create or update a PR")
-    verify = PROMPT.index("7. Dispatch the repository CI")
-    handoff = PROMPT.index("READY_TO_MERGE")
-    assert research < implement < tests < pr < verify < handoff
-
-
-def test_provider_blocked_is_a_durable_handoff_not_infrastructure_failure():
-    assert "Provider exhaustion is a durable handoff state" in WORKFLOW
-    assert "exit 0" in WORKFLOW
-    assert "Fail if selected provider failed without fallback" in WORKFLOW
-
-
-def test_controller_runs_before_provider_actions():
-    controller = WORKFLOW.index("Select first authorized provider")
-    gemini = WORKFLOW.index("Run Career OS cycle with Gemini")
-    fallback = WORKFLOW.index("Select fallback after Gemini failure")
-    codex = WORKFLOW.index("Run fallback Career OS cycle with Codex")
-    assert controller < gemini < fallback < codex
+    assert "workflow_dispatch:" in WORKFLOW
+    assert "actions/upload-artifact@v4" in WORKFLOW
+    assert "career-os-automation-report" in WORKFLOW
+    assert "application submission: **disabled**" in WORKFLOW
