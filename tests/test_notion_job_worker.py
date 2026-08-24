@@ -103,7 +103,9 @@ def test_retryable_service_overload_and_conflict_codes_are_enabled():
 
 def test_pacing_waits_between_requests(monkeypatch):
     monkeypatch.setattr(worker, "MIN_REQUEST_INTERVAL", 0.35)
-    times = iter([10.0, 10.1, 10.45])
+    # _pace_request reads monotonic once to decide whether to wait and once
+    # after the wait to record the request timestamp.
+    times = iter([10.0, 10.0, 10.1, 10.1])
     sleeps = []
     monkeypatch.setattr(worker.time, "monotonic", lambda: next(times))
     monkeypatch.setattr(worker.time, "sleep", lambda seconds: sleeps.append(seconds))
