@@ -19,7 +19,7 @@ def test_resume_library_properties_include_tailored_file_and_job_relation():
     assert properties["Status"] == {"select": {"name": "Tailored"}}
     assert properties["Claims Verified"] == {"checkbox": True}
     assert properties["ATS Score"] == {"number": 87.5}
-    assert properties["Job"]["relation"][0]["id"] == "11111111222233334444555555555555"
+    assert properties["Job"]["relation"][0]["id"] == "11111111-2222-3333-4444-555555555555"
     assert properties["File"]["files"][0]["type"] == "file_upload"
     assert properties["File"]["files"][0]["file_upload"]["id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
