@@ -59,7 +59,6 @@ def notion_request(method: str, path: str, body: dict[str, Any] | None = None) -
         raise RuntimeError("NOTION_TOKEN is not configured")
     payload = None if body is None else json.dumps(body).encode("utf-8")
     last_error: Exception | None = None
-
     for attempt in range(MAX_RETRIES):
         request = Request(
             "https://api.notion.com/v1" + path,
@@ -89,7 +88,6 @@ def notion_request(method: str, path: str, body: dict[str, Any] | None = None) -
                 _sleep_for_retry(attempt)
                 continue
             raise last_error from exc
-
     raise last_error or RuntimeError("Notion request failed")
 
 
@@ -168,7 +166,6 @@ def process(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
     page_id = page["id"]
     title = prop(page, "Job") or "Untitled job"
     company = prop(page, "Company") or "Unknown employer"
-
     try:
         description = prop(page, "JD")
         if not description.strip():
@@ -179,7 +176,6 @@ def process(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
                 "Assigned Agent": "Career OS Native Worker",
             })
             return False, f"blocked: missing JD — {title}"
-
         update_page(page_id, {
             "Processing Stage": "Analyzing",
             "Status": "Analyzing",
@@ -187,7 +183,6 @@ def process(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
             "Blockers": "",
             "Assigned Agent": "Career OS Native Worker",
         })
-
         run_id = "notion-" + re.sub(r"[^a-z0-9]+", "-", f"{company}-{title}".casefold()).strip("-")[:90] + "-" + page_id.replace("-", "")[:8]
         checkpoint = ROOT / ".career-os" / "runs" / f"{run_id}.json"
         claims, resume = claims_from_profile(profile)
@@ -204,9 +199,6 @@ def process(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
         hard_gaps = getattr(result.fit, "hard_gaps", None) or []
         blockers = "; ".join(str(x) for x in hard_gaps) if hard_gaps else "; ".join(str(getattr(x, "message", x)) for x in findings)[:1900]
         ready = bool(result.application_ready)
-
-        # Candidate-facing PDF generation is intentionally not claimed here until
-        # the verified artifact renderer is merged and actually produces one.
         update_page(page_id, {
             "Processing Stage": "Recruiter Review",
             "Status": "Shortlisted",
@@ -238,29 +230,25 @@ def fetch_queued() -> list[dict[str, Any]]:
     data_source_id = os.environ.get("NOTION_DATA_SOURCE_ID", DEFAULT_DATA_SOURCE_ID).replace("-", "")
     jobs: list[dict[str, Any]] = []
     cursor: str | None = None
-
     while len(jobs) < MAX_JOBS:
         body: dict[str, Any] = {"page_size": min(PAGE_SIZE, MAX_JOBS - len(jobs))}
         if cursor:
             body["start_cursor"] = cursor
         response = notion_request("POST", f"/data_sources/{data_source_id}/query", body)
-
         for page in response.get("results", []):
             stage = prop(page, "Processing Stage")
             status = prop(page, "Status")
-            if stage in QUEUE_STAGES and stage not in TERMINAL_STAGES:
-                if stage == "" and status in TERMINAL_STATUSES:
-                    continue
+            if status in TERMINAL_STATUSES or stage in TERMINAL_STAGES:
+                continue
+            if stage in QUEUE_STAGES:
                 jobs.append(page)
                 if len(jobs) >= MAX_JOBS:
                     break
-
         if len(jobs) >= MAX_JOBS or not response.get("has_more"):
             break
         cursor = response.get("next_cursor")
         if not cursor:
             break
-
     return jobs
 
 
@@ -271,21 +259,12 @@ def write_report(report: dict[str, Any]) -> None:
 
 def main() -> int:
     started = time.time()
-    report: dict[str, Any] = {
-        "ok": False,
-        "started_at": started,
-        "jobs_found": 0,
-        "successes": 0,
-        "failures": 0,
-        "results": [],
-    }
-
+    report: dict[str, Any] = {"ok": False, "started_at": started, "jobs_found": 0, "successes": 0, "failures": 0, "results": []}
     if not os.environ.get("NOTION_TOKEN"):
         report["error"] = "NOTION_TOKEN not configured"
         write_report(report)
         print("NOTION_WORKER_SYSTEM_ERROR: NOTION_TOKEN not configured")
         return 2
-
     try:
         profile = load_candidate_source_of_truth()
         jobs = fetch_queued()
@@ -294,29 +273,18 @@ def main() -> int:
         write_report(report)
         print(f"NOTION_WORKER_SYSTEM_ERROR: {report['error']}")
         return 2
-
     report["jobs_found"] = len(jobs)
     print(f"Queued Notion jobs found: {len(jobs)}")
-
     for page in jobs:
         ok, message = process(page, profile)
         report["successes"] += int(ok)
         report["failures"] += int(not ok)
-        report["results"].append({
-            "job_id": page.get("id"),
-            "job": prop(page, "Job"),
-            "ok": ok,
-            "message": message,
-        })
+        report["results"].append({"job_id": page.get("id"), "job": prop(page, "Job"), "ok": ok, "message": message})
         print(message)
-
     report["ok"] = report["failures"] == 0
     report["duration_seconds"] = round(time.time() - started, 2)
     write_report(report)
     print(f"Processed successfully: {report['successes']}/{report['jobs_found']}; failures: {report['failures']}")
-
-    # Per-job failures are deliberately non-fatal: they are durable data in the
-    # report and the affected Notion page. Systemic intake failures return 2.
     return 0
 
 
