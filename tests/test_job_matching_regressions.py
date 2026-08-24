@@ -14,14 +14,14 @@ def test_jd_parser_does_not_turn_boilerplate_into_hard_requirements():
     jd = JDIntelligence().analyze(
         """Qualifications:\nEducation:\nBachelor’s degree in any discipline or equivalent\nExperience:\n1-3 year of related experience is required.\nTechnical Skills:\nBasic knowledge of Unix/Linux operating systems.\nBasic understanding of SQL queries.\nFamiliarity with file transfer mechanisms (FTP, SFTP or similar).\nUnderstanding of cloud computing concepts, including basic cloud setup and infrastructure (VMs, storage, networking fundamentals).\nRelevant Skills:\nProblem Solving\nGood verbal and written communication skills.\nSuccess Profile\nLeading Complexity\nBrightstar is committed to sustaining a workforce that reflects diversity.\nApply now"""
     )
-    assert jd.must_have_requirements == (
+    assert jd.must_have_requirements == [
         "Bachelor’s degree in any discipline or equivalent",
         "1-3 year of related experience is required.",
         "Basic knowledge of Unix/Linux operating systems.",
         "Basic understanding of SQL queries.",
         "Familiarity with file transfer mechanisms (FTP, SFTP or similar).",
         "Understanding of cloud computing concepts, including basic cloud setup and infrastructure (VMs, storage, networking fundamentals).",
-    )
+    ]
     assert all("Brightstar is committed" not in item for item in jd.must_have_requirements)
     assert all("Success Profile" not in item for item in jd.must_have_requirements)
 
