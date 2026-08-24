@@ -209,34 +209,50 @@ def build_properties(props: dict[str, dict[str, Any]], *, title: str, company: s
 
 
 def existing_keys(token: str, data_source_id: str, props: dict[str, dict[str, Any]]) -> set[str]:
-    response = notion_request(f"/data_sources/{data_source_id.replace('-', '')}/query", token, method="POST", body={"page_size": 100})
     keys: set[str] = set()
-    for page in response.get("results", []):
-        values = page.get("properties", {})
-        for wanted in ("Job URL", "Gmail Message ID"):
-            found = find_prop(props, wanted)
-            if not found:
-                continue
-            name, _ = found
-            value_obj = values.get(name, {})
-            kind = value_obj.get("type")
-            value = value_obj.get(kind)
-            if kind == "url":
-                value = value or ""
-            elif kind == "rich_text":
-                value = "".join(x.get("plain_text", "") for x in (value or []))
-            if value:
-                keys.add(normalize(str(value)))
+    start_cursor: str | None = None
+    while True:
+        body: dict[str, Any] = {"page_size": 100}
+        if start_cursor:
+            body["start_cursor"] = start_cursor
+        response = notion_request(
+            f"/data_sources/{data_source_id.replace('-', '')}/query",
+            token,
+            method="POST",
+            body=body,
+        )
+        for page in response.get("results", []):
+            values = page.get("properties", {})
+            for wanted in ("Job URL", "Gmail Message ID"):
+                found = find_prop(props, wanted)
+                if not found:
+                    continue
+                name, _ = found
+                value_obj = values.get(name, {})
+                kind = value_obj.get("type")
+                value = value_obj.get(kind)
+                if kind == "url":
+                    value = value or ""
+                elif kind == "rich_text":
+                    value = "".join(x.get("plain_text", "") for x in (value or []))
+                if value:
+                    keys.add(normalize(str(value)))
+        if not response.get("has_more"):
+            break
+        next_cursor = response.get("next_cursor")
+        if not next_cursor:
+            raise RuntimeError("Notion pagination reported has_more without next_cursor")
+        start_cursor = str(next_cursor)
     return keys
 
 
-def create_page(token: str, data_source_id: str, properties: dict[str, Any], body: str) -> str:
+def create_page(notion_token: str, data_source_id: str, properties: dict[str, Any], body: str) -> str:
     children = [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": body[:1900]}}]}}]
-    response = notion_request("/pages", token, method="POST", body={"parent": {"data_source_id": data_source_id}, "properties": properties, "children": children})
+    response = notion_request("/pages", notion_token, method="POST", body={"parent": {"data_source_id": data_source_id}, "properties": properties, "children": children})
     return str(response.get("id", ""))
 
 
-def process_message(token: str, data_source_id: str, props: dict[str, dict[str, Any]], message: dict[str, Any], known: set[str]) -> tuple[str, str]:
+def process_message(notion_token: str, data_source_id: str, props: dict[str, dict[str, Any]], message: dict[str, Any], known: set[str]) -> tuple[str, str]:
     message_id = str(message.get("id", ""))
     headers, body = message_text(message)
     subject = headers.get("subject", "").strip()
@@ -250,7 +266,7 @@ def process_message(token: str, data_source_id: str, props: dict[str, dict[str, 
     title = extract_title(subject, body)
     company = extract_company(headers, subject, body)
     properties = build_properties(props, title=title, company=company, body=combined, url=url, source="Gmail", gmail_id=message_id)
-    page_id = create_page(token, data_source_id, properties, combined)
+    page_id = create_page(notion_token, data_source_id, properties, combined)
     if not page_id:
         raise RuntimeError("Notion page creation returned no page id")
     known.add(fingerprint)
@@ -282,7 +298,7 @@ def main() -> int:
         for stub in messages:
             try:
                 message = gmail_api(f"messages/{stub['id']}", gmail_token, {"format": "full"})
-                outcome, detail = process_message(gmail_token, data_source_id, props, message, known)
+                outcome, detail = process_message(notion_token, data_source_id, props, message, known)
                 report[outcome] = report.get(outcome, 0) + 1
                 report["results"].append({"message_id": stub["id"], "outcome": outcome, "detail": detail})
             except Exception as exc:
