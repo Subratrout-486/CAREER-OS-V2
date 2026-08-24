@@ -58,6 +58,43 @@ def test_education_matching_handles_generic_levels_and_specific_families(require
     assert result.hard_requirements == 100.0
 
 
+@pytest.mark.parametrize(
+    ("requirement", "claim"),
+    [
+        ("Undergraduate degree", "Undergraduate degree"),
+        ("Engineering degree", "Engineering degree"),
+        ("Computer science degree", "Computer science degree"),
+        ("B.E. degree", "B.E. degree"),
+        ("M.E. degree", "M.E. degree"),
+    ],
+)
+def test_contextual_degree_forms_match_identical_evidence(requirement: str, claim: str) -> None:
+    """Ensure contextual degree forms are classified and can match identical evidence."""
+    jd = JDAnalysis(source_text="x", must_have_requirements=[requirement])
+    result = FitScorer().score(jd, _ledger(claim))
+
+    assert result.education_gaps == ()
+    assert result.education_risk == "matched"
+    assert result.hard_gaps == ()
+    assert result.hard_requirements == 100.0
+
+
+@pytest.mark.parametrize(
+    "requirement",
+    ["Must be proficient in Python", "Must be proficient in SQL", "Must be proficient in Linux"],
+)
+def test_ordinary_requirements_are_not_misclassified_as_degrees(requirement: str) -> None:
+    """Ensure ordinary 'be'/'me'-like wording is never treated as education."""
+    claim = requirement.replace("Must be proficient in ", "")
+    jd = JDAnalysis(source_text="x", must_have_requirements=[requirement])
+    result = FitScorer().score(jd, _ledger(claim))
+
+    assert result.education_gaps == ()
+    assert result.education_risk == "not_stated"
+    assert result.hard_gaps == ()
+    assert result.hard_requirements == 100.0
+
+
 def test_education_only_mismatch_does_not_reduce_overall_fit() -> None:
     """Ensure adding an unmatched education requirement does not lower fit."""
     without_education = JDAnalysis(source_text="x", must_have_requirements=["Python"])
