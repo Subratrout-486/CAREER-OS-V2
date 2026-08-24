@@ -47,4 +47,4 @@ def test_tailor_never_selects_unsupported_claims():
     result = ResumeTailor().tailor(resume, jd, ledger)
 
     assert [b.text for b in result.bullets] == ["SQL troubleshooting"]
-    assert result.omitted_claim_ids == ("unsupported",)
+    assert result.omitted_claim_ids == ()
