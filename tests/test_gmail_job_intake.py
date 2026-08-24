@@ -48,3 +48,68 @@ def test_application_confirmation_is_not_ingested():
     text = "Thank you for applying to the Technical Support Engineer position. We received your application."
     assert module.JOB_TERMS.search(text)
     assert module.EXCLUDE_TERMS.search(text)
+
+
+def test_existing_keys_paginates_all_notion_results(monkeypatch):
+    calls = []
+    responses = [
+        {
+            "results": [
+                {"properties": {"Gmail Message ID": {"type": "rich_text", "rich_text": [{"plain_text": "first"}]}}}
+            ],
+            "has_more": True,
+            "next_cursor": "cursor-2",
+        },
+        {
+            "results": [
+                {"properties": {"Gmail Message ID": {"type": "rich_text", "rich_text": [{"plain_text": "second"}]}}}
+            ],
+            "has_more": False,
+            "next_cursor": None,
+        },
+    ]
+
+    def fake_notion_request(path, token, *, method="GET", body=None):
+        calls.append(body)
+        return responses[len(calls) - 1]
+
+    monkeypatch.setattr(module, "notion_request", fake_notion_request)
+    props = {"Gmail Message ID": {"type": "rich_text", "rich_text": {}}}
+
+    assert module.existing_keys("notion-token", "data-source", props) == {"first", "second"}
+    assert calls[0] == {"page_size": 100}
+    assert calls[1] == {"page_size": 100, "start_cursor": "cursor-2"}
+
+
+def test_process_message_uses_notion_token_for_page_creation(monkeypatch):
+    captured = {}
+
+    def fake_create_page(token, data_source_id, properties, body):
+        captured["token"] = token
+        return "page-123"
+
+    monkeypatch.setattr(module, "create_page", fake_create_page)
+    monkeypatch.setattr(module, "build_properties", lambda *args, **kwargs: {})
+
+    message = {
+        "id": "gmail-123",
+        "payload": {
+            "headers": [
+                {"name": "Subject", "value": "Job: Associate Technical Support Engineer"},
+                {"name": "From", "value": "jobs@example.com"},
+            ],
+            "body": {"data": ""},
+        },
+        "snippet": "We are hiring for an Associate Technical Support Engineer role.",
+    }
+
+    outcome, _ = module.process_message(
+        "notion-token",
+        "data-source",
+        {"Job": {"type": "title", "title": {}}},
+        message,
+        set(),
+    )
+
+    assert outcome == "created"
+    assert captured["token"] == "notion-token"
