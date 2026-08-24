@@ -15,7 +15,7 @@ def page(job: str, stage: str | None = None, status: str | None = None, jd: str 
     properties = {
         "Job": {"type": "title", "title": [{"plain_text": job}]},
         "Processing Stage": {"type": "select", "select": {"name": stage} if stage else None},
-        "Status": {"type": "select", "select": {"name": status} if status else None},
+        "Status": {"type": "status", "status": {"name": status} if status else None},
     }
     if jd is not None:
         properties["JD"] = {"type": "rich_text", "rich_text": [{"plain_text": jd}]}
@@ -86,6 +86,34 @@ def test_retry_after_is_honoured_and_bounded(monkeypatch):
     monkeypatch.setattr(worker.time, "sleep", lambda seconds: sleeps.append(seconds))
     worker._sleep_for_retry(4, "120")
     assert sleeps == [60.0]
+
+
+def test_status_property_uses_notion_status_type(monkeypatch):
+    captured = []
+    monkeypatch.setattr(worker, "notion_request", lambda method, path, body=None: captured.append(body) or {})
+    worker.update_page("page-1", {"Status": "Analyzing", "Processing Stage": "Analyzing"})
+    properties = captured[0]["properties"]
+    assert properties["Status"] == {"status": {"name": "Analyzing"}}
+    assert properties["Processing Stage"] == {"select": {"name": "Analyzing"}}
+
+
+def test_retryable_service_overload_and_conflict_codes_are_enabled():
+    assert {409, 529}.issubset(worker.RETRYABLE_HTTP)
+
+
+def test_pacing_waits_between_requests(monkeypatch):
+    monkeypatch.setattr(worker, "MIN_REQUEST_INTERVAL", 0.35)
+    # _pace_request reads monotonic once to decide whether to wait and once
+    # after the wait to record the request timestamp.
+    times = iter([10.0, 10.0, 10.1, 10.1])
+    sleeps = []
+    monkeypatch.setattr(worker.time, "monotonic", lambda: next(times))
+    monkeypatch.setattr(worker.time, "sleep", lambda seconds: sleeps.append(seconds))
+    worker._LAST_REQUEST_AT = 0.0
+    worker._pace_request()
+    worker._pace_request()
+    assert len(sleeps) == 1
+    assert abs(sleeps[0] - 0.25) < 1e-9
 
 
 def test_process_failure_is_isolated(monkeypatch):
