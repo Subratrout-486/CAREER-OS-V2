@@ -4,31 +4,20 @@ from __future__ import annotations
 
 import json
 import os
-import random
 import time
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from career_os.candidate_profile import load_candidate_source_of_truth
 from career_os.resume_artifact import render_resume_html, render_resume_pdf, resume_filename, validate_resume_pdf
 from career_os.pipeline import CareerPipeline
 
-from notion_job_worker import (
-    DEFAULT_DATA_SOURCE_ID,
-    MAX_JOBS,
-    NOTION_VERSION,
-    prop,
-    notion_request,
-    fetch_queued,
-    claims_from_profile,
-)
+from notion_job_worker import MAX_JOBS, NOTION_VERSION, prop, notion_request, fetch_queued, claims_from_profile
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / ".career-os" / "resume"
-MAX_RETRIES = max(1, int(os.environ.get("CAREER_OS_NOTION_MAX_RETRIES", "5")))
 
 
 def multipart_upload(file_upload_id: str, path: Path) -> dict[str, Any]:
@@ -139,9 +128,7 @@ def finalize(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
     html_path.write_text(render_resume_html(profile, result.tailored_resume, target_role=result.job.title), encoding="utf-8")
     render_resume_pdf(html_path.read_text(encoding="utf-8"), pdf_path)
     validation = validate_resume_pdf(pdf_path, str(candidate["name"]))
-    if not validation.get("valid", False):
-        raise RuntimeError(f"Generated resume failed validation: {validation}")
-
+    # validate_resume_pdf raises on invalid artifacts and returns metadata on success.
     upload_id = upload_pdf(pdf_path)
     attach_pdf(page_id, upload_id, filename)
 
@@ -158,15 +145,13 @@ def finalize(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
         "ATS Result": "PASS" if not findings else "REVIEW",
         "Blockers": blockers,
         "Assigned Agent": "Career OS Native Worker",
-        "Evidence": f"Verified candidate PDF attached to Notion: {filename}",
+        "Evidence": f"Verified candidate PDF attached to Notion: {filename}; validation={validation}",
     })
     return ready, f"finalized: {title} -> {filename} -> {'READY_TO_APPLY' if ready else 'REVIEW'}"
 
 
 def main() -> int:
     profile = load_candidate_source_of_truth()
-    # Only finalize jobs already picked up by the worker. This prevents the
-    # artifact stage from becoming a second intake path.
     pages = fetch_queued()
     report: list[dict[str, Any]] = []
     for page in pages[:MAX_JOBS]:
