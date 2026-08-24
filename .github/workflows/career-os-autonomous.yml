@@ -138,7 +138,6 @@ jobs:
             .career-os/native-smoke-result.json
             .career-os/notion-worker-report.json
             .career-os/resume-finalize-report.json
-            .career-os/native-smoke-result.json
             .career-os/resume/
           if-no-files-found: warn
           include-hidden-files: true
