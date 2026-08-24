@@ -104,23 +104,19 @@ def _evidence_match(requirement: str, claims: tuple[EvidenceClaim, ...]) -> Requ
 
 
 class FitScorer:
-    """Deterministically scores JD requirements against an evidence ledger.
-
-    Education mismatches are retained as transparent risk signals but are not
-    hard gates or scoring penalties. This avoids rejecting otherwise qualified
-    candidates solely because a JD names a preferred/required degree.
-    """
+    """Deterministically scores requirements; education is a visible risk, not a gate."""
 
     name = "fit_scorer"
 
     def score(self, jd: JDAnalysis, ledger: EvidenceLedger) -> FitScore:
         claims = ledger.claims
         hard_all = tuple(_evidence_match(req, claims) for req in jd.must_have_requirements)
-        preferred = tuple(_evidence_match(req, claims) for req in jd.preferred_requirements)
+        preferred_all = tuple(_evidence_match(req, claims) for req in jd.preferred_requirements)
         skills = tuple(_evidence_match(skill, claims) for skill in jd.skills)
 
-        education = tuple(e for e in hard_all if _is_education_requirement(e.requirement))
+        education = tuple(e for e in (*hard_all, *preferred_all) if _is_education_requirement(e.requirement))
         hard = tuple(e for e in hard_all if not _is_education_requirement(e.requirement))
+        preferred = tuple(e for e in preferred_all if not _is_education_requirement(e.requirement))
 
         def component(evaluations: tuple[RequirementEvaluation, ...]) -> float:
             if not evaluations:
@@ -137,7 +133,7 @@ class FitScorer:
         preferred_gaps = tuple(e.requirement for e in preferred if e.status is RequirementStatus.MISSING)
         education_gaps = tuple(e.requirement for e in education if e.status is not RequirementStatus.MATCHED)
         education_risk = "mismatch" if education_gaps else "matched" if education else "not_stated"
-        evidence_ids = tuple(dict.fromkeys(claim_id for evaluation in (*hard_all, *preferred, *skills) for claim_id in evaluation.evidence_claim_ids))
+        evidence_ids = tuple(dict.fromkeys(claim_id for evaluation in (*hard_all, *preferred_all, *skills) for claim_id in evaluation.evidence_claim_ids))
         recommendation = "hard_gap" if hard_gaps else ("strong_fit" if overall >= 80 else "moderate_fit" if overall >= 60 else "weak_fit")
 
         return FitScore(
