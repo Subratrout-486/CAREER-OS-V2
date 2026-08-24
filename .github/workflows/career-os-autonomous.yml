@@ -52,12 +52,14 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/native_job_smoke_test.py
-      - name: Verify native cycle artifact exists
+      - name: Verify native cycle artifacts exist
         if: always()
         shell: bash
         run: |
           set -euo pipefail
           test -s .career-os/native-smoke-result.json
+          test -s .career-os/resume/*.pdf
+          test -s .career-os/resume/*.html
       - name: Publish native cycle result
         if: always()
         shell: bash
@@ -67,17 +69,17 @@ jobs:
             {
               echo '## Career OS native cycle'
               echo
-              echo 'Provider-independent job ingestion and deterministic pipeline execution completed.'
+              echo 'Provider-independent job ingestion, deterministic pipeline execution, and candidate-facing resume generation completed.'
               echo
               echo '```json'
               cat .career-os/native-smoke-result.json
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
-      - name: Upload native cycle artifact
+      - name: Upload native cycle artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: career-os-native-smoke
-          path: .career-os/native-smoke-result.json
+          path: .career-os/
           if-no-files-found: error
