@@ -13,6 +13,11 @@ from urllib.request import Request, urlopen
 from career_os.candidate_profile import load_candidate_source_of_truth
 from career_os.resume_artifact import render_resume_html, render_resume_pdf, resume_filename, validate_resume_pdf
 from career_os.pipeline import CareerPipeline
+from career_os.resume_library import (
+    DEFAULT_RESUME_LIBRARY_DATA_SOURCE_ID,
+    build_resume_library_properties,
+    next_version,
+)
 
 from notion_job_worker import MAX_JOBS, NOTION_VERSION, prop, notion_request, fetch_queued, claims_from_profile
 
@@ -99,6 +104,101 @@ def update_page(page_id: str, updates: dict[str, Any]) -> None:
     notion_request("PATCH", f"/pages/{page_id}", {"properties": properties})
 
 
+def _query_resume_library() -> list[dict[str, Any]]:
+    data_source_id = os.environ.get(
+        "NOTION_RESUME_LIBRARY_DATA_SOURCE_ID",
+        DEFAULT_RESUME_LIBRARY_DATA_SOURCE_ID,
+    )
+    results: list[dict[str, Any]] = []
+    start_cursor: str | None = None
+    while True:
+        body: dict[str, Any] = {"page_size": 100}
+        if start_cursor:
+            body["start_cursor"] = start_cursor
+        response = notion_request(
+            "POST",
+            f"/data_sources/{data_source_id.replace('-', '')}/query",
+            body,
+        )
+        results.extend(response.get("results", []) or [])
+        if not response.get("has_more"):
+            return results
+        start_cursor = response.get("next_cursor")
+        if not start_cursor:
+            raise RuntimeError("Resume Library pagination reported has_more without next_cursor")
+
+
+def _text_property(page: dict[str, Any], name: str) -> str:
+    value = (page.get("properties", {}) or {}).get(name, {})
+    kind = value.get("type")
+    raw = value.get(kind)
+    if kind in {"title", "rich_text"}:
+        return "".join(item.get("plain_text", "") for item in (raw or []))
+    if kind == "select":
+        return str((raw or {}).get("name", ""))
+    return str(raw or "")
+
+
+def _relation_ids(page: dict[str, Any], name: str) -> set[str]:
+    value = (page.get("properties", {}) or {}).get(name, {})
+    if value.get("type") != "relation":
+        return set()
+    return {str(item.get("id", "")).replace("-", "") for item in (value.get("relation") or [])}
+
+
+def register_resume_library(
+    *,
+    job_id: str,
+    filename: str,
+    role_family: str,
+    source: str,
+    ats_score: float | None,
+    claims_verified: bool,
+    upload_id: str,
+) -> str:
+    """Create or reuse the tailored-resume index record for a job."""
+    data_source_id = os.environ.get(
+        "NOTION_RESUME_LIBRARY_DATA_SOURCE_ID",
+        DEFAULT_RESUME_LIBRARY_DATA_SOURCE_ID,
+    )
+    job_key = job_id.replace("-", "")
+    rows = _query_resume_library()
+    versions: list[str] = []
+    for row in rows:
+        row_job_ids = _relation_ids(row, "Job")
+        row_filename = _text_property(row, "Resume")
+        if job_key in row_job_ids:
+            version = _text_property(row, "Version")
+            if version:
+                versions.append(version)
+            if row_filename == filename:
+                return str(row.get("id", ""))
+
+    version = next_version(versions)
+    properties = build_resume_library_properties(
+        resume_name=filename,
+        status="Tailored",
+        role_family=role_family,
+        version=version,
+        source=source,
+        claims_verified=claims_verified,
+        notes=f"Generated and validated by Career OS Native Worker; linked to Job page {job_id}.",
+        ats_score=ats_score,
+        job_id=job_id,
+        file_upload_id=upload_id,
+        filename=filename,
+    )
+    created = notion_request(
+        "POST",
+        "/pages",
+        {"parent": {"data_source_id": data_source_id}, "properties": properties},
+    )
+    created_id = str(created.get("id", ""))
+    if not created_id:
+        raise RuntimeError("Resume Library page creation returned no page id")
+    return created_id
+
+
 def finalize(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
     page_id = page["id"]
     title = prop(page, "Job") or "Untitled job"
@@ -128,7 +228,6 @@ def finalize(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
     html_path.write_text(render_resume_html(profile, result.tailored_resume, target_role=result.job.title), encoding="utf-8")
     render_resume_pdf(html_path.read_text(encoding="utf-8"), pdf_path)
     validation = validate_resume_pdf(pdf_path, str(candidate["name"]))
-    # validate_resume_pdf raises on invalid artifacts and returns metadata on success.
     upload_id = upload_pdf(pdf_path)
     attach_pdf(page_id, upload_id, filename)
 
@@ -147,6 +246,24 @@ def finalize(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
         "Assigned Agent": "Career OS Native Worker",
         "Evidence": f"Verified candidate PDF attached to Notion: {filename}; validation={validation}",
     })
+    try:
+        library_id = register_resume_library(
+            job_id=page_id,
+            filename=filename,
+            role_family=str(getattr(result.job, "role_family", "") or prop(page, "Role Family") or "Other"),
+            source=prop(page, "Source") or "Notion",
+            ats_score=float(getattr(result.fit, "score", 0) or 0) if getattr(result.fit, "score", None) is not None else None,
+            claims_verified=True,
+            upload_id=upload_id,
+        )
+        update_page(
+            page_id,
+            {"Evidence": f"Verified candidate PDF attached to Notion: {filename}; validation={validation}; Resume Library={library_id}"},
+        )
+    except Exception as exc:
+        # Resume generation remains valid even if indexing fails; report the index failure explicitly.
+        raise RuntimeError(f"resume finalized but Resume Library registration failed: {exc}") from exc
+
     return ready, f"finalized: {title} -> {filename} -> {'READY_TO_APPLY' if ready else 'REVIEW'}"
 
 
