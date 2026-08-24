@@ -50,7 +50,7 @@ def build_resume_library_properties(
     if ats_score is not None:
         properties["ATS Score"] = {"number": float(ats_score)}
     if job_id:
-        properties["Job"] = {"relation": [{"id": job_id.replace("-", "")}]}
+        properties["Job"] = {"relation": [{"id": job_id}]}
     if file_upload_id:
         file_obj: dict[str, Any] = {"type": "file_upload", "file_upload": {"id": file_upload_id}}
         if filename:
