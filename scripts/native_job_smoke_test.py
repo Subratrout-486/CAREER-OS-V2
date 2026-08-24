@@ -10,10 +10,13 @@ from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+from pypdf import PdfReader
+
 from career_os.candidate_profile import load_candidate_source_of_truth
 from career_os.models.evidence import EvidenceClaim, EvidenceKind, EvidenceSource, SupportStatus
 from career_os.models.resume import ResumeBullet, ResumeProfile
 from career_os.pipeline import CareerPipeline
+from career_os.resume_artifact import render_resume_html, render_resume_pdf, resume_filename
 
 
 class _HTMLText(HTMLParser):
@@ -101,8 +104,6 @@ def _company(posting: dict[str, object], parser: _HTMLText, source_url: str, tit
     for key in ("og:site_name", "application-name", "author"):
         if parser.meta.get(key):
             return parser.meta[key]
-    # SAP/SuccessFactors pages frequently put the employer in the HTML title even
-    # when JobPosting JSON-LD omits hiringOrganization.
     if " | " in title:
         suffix = title.rsplit(" | ", 1)[-1].strip()
         if suffix and "job details" not in suffix.casefold():
@@ -136,9 +137,6 @@ def _claims(profile: dict[str, object]) -> tuple[list[EvidenceClaim], ResumeProf
             claims.append(EvidenceClaim(claim_id, claim, EvidenceKind.VERIFIED, SupportStatus.SUPPORTED, 1.0, source))
             bullets.append(ResumeBullet(str(detail), (claim_id,)))
 
-    # Education and the canonical skill inventory are evidence too. They are not
-    # employment claims, but excluding them causes valid degree/skill requirements
-    # to be falsely classified as hard gaps.
     for index, education in enumerate(profile.get("education", [])):
         qualification = str(education.get("qualification", ""))
         institution = str(education.get("institution", ""))
@@ -186,6 +184,26 @@ def main() -> int:
     pipeline = CareerPipeline(Path(".career-os/native-smoke-checkpoint.json"))
     result = pipeline.run(run_id=run_id, raw_job=raw_job, resume=resume, claims=claims)
 
+    candidate = profile["candidate"]
+    target_role = result.job.title
+    resume_dir = Path(".career-os/resume")
+    resume_dir.mkdir(parents=True, exist_ok=True)
+    resume_name = resume_filename(str(candidate["name"]), target_role)
+    resume_html = render_resume_html(profile, result.tailored_resume, target_role=target_role)
+    html_path = resume_dir / resume_name.replace(".pdf", ".html")
+    pdf_path = resume_dir / resume_name
+    html_path.write_text(resume_html, encoding="utf-8")
+    render_resume_pdf(resume_html, pdf_path)
+
+    reader = PdfReader(str(pdf_path))
+    if len(reader.pages) != 1:
+        raise RuntimeError(f"Tailored resume must be one page; rendered {len(reader.pages)} pages")
+    extracted_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+    if str(candidate["name"]) not in extracted_text:
+        raise RuntimeError("Rendered resume PDF does not contain the canonical candidate name")
+    if any(marker in extracted_text.casefold() for marker in ("career os v2", "career-os-v2")):
+        raise RuntimeError("Internal Career OS branding leaked into rendered resume PDF")
+
     output = {
         "run_id": run_id,
         "source_url": args.url,
@@ -198,6 +216,10 @@ def main() -> int:
         "matched_keywords": list(result.tailored_resume.matched_keywords),
         "ats_findings": [finding.__dict__ for finding in result.ats_audit.findings],
         "recruiter_recommendation": result.recruiter_review.recommendation,
+        "resume_filename": resume_name,
+        "resume_pdf": str(pdf_path),
+        "resume_html": str(html_path),
+        "resume_page_count": len(reader.pages),
     }
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
