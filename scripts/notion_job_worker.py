@@ -38,7 +38,7 @@ REPORT_PATH = ROOT / ".career-os" / "notion-worker-report.json"
 QUEUE_STAGES = {
     "", "Discovered", "Verified", "Analyzing", "Resume Ready", "ATS Checked", "Recruiter Review"
 }
-TERMINAL_STAGES = {"Ready to Apply", "Applied", "Blocked"}
+TERMINAL_STAGES = {"Ready to Apply", "Resume Finalized", "Applied", "Blocked"}
 TERMINAL_STATUSES = {"Applied", "Rejected", "Closed"}
 # 429/5xx are documented transient failures; 409/425/529 can also be transient
 # service/concurrency responses and are safe to retry for idempotent reads and
@@ -214,6 +214,7 @@ def process(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
             "source": prop(page, "Source") or "Notion",
             "description": description,
         }
+        from career_os.pipeline import CareerPipeline
         result = CareerPipeline(checkpoint).run(run_id=run_id, raw_job=raw_job, resume=resume, claims=claims)
         findings = getattr(result.ats_audit, "findings", None) or []
         hard_gaps = getattr(result.fit, "hard_gaps", None) or []
