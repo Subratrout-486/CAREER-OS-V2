@@ -15,6 +15,10 @@ concurrency:
   group: career-os-autonomous-loop
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  actions: read
+
 jobs:
   autonomous-cycle:
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
