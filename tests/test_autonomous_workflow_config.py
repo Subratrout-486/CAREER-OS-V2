@@ -31,6 +31,14 @@ def test_autonomous_workflow_preserves_safe_handoff_and_verification_contract():
     assert "PROVIDER_BLOCKED" in PROMPT
 
 
+def test_workflow_run_checks_out_the_completed_ci_head_sha():
+    exact_head_sha = "github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha"
+    assert exact_head_sha in WORKFLOW
+    assert "ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}" in WORKFLOW
+    assert "EXPECTED_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}" in WORKFLOW
+    assert 'github.sha }}"' not in WORKFLOW.split("- name: Check out exact triggering commit", 1)[1].split("- name: Set up Python", 1)[0]
+
+
 def test_autonomous_workflow_preserves_research_first_sequence():
     research = PROMPT.index("1. Research relevant")
     implement = PROMPT.index("3. Implement")
