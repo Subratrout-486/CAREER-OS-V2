@@ -24,6 +24,7 @@ spec.loader.exec_module(worker)
 def update_page(page_id: str, updates: dict[str, Any]) -> None:
     """Write values using the live Jobs data-source property types."""
     properties: dict[str, Any] = {}
+    # Verified against the connected Jobs data-source schema on 2026-08-24.
     select_properties = {
         "Status",
         "Processing Stage",
