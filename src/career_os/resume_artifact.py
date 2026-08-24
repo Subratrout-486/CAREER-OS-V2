@@ -11,6 +11,7 @@ _INTERNAL_MARKERS = ("career os v2", "career-os-v2", "career_os_v2")
 _A4_WIDTH_POINTS = 595.28
 _A4_HEIGHT_POINTS = 841.89
 _A4_TOLERANCE_POINTS = 2.0
+_MAX_RESUME_PAGES = 2
 
 
 def _slug(value: str) -> str:
@@ -145,17 +146,29 @@ def render_resume_pdf(html_content: str, output_path: Path) -> None:
 
 
 def validate_resume_pdf(pdf_path: Path, candidate_name: str) -> dict[str, object]:
+    """Validate a candidate PDF while allowing the agreed 1–2 page range."""
     from pypdf import PdfReader
     reader = PdfReader(str(pdf_path))
-    if len(reader.pages) != 1:
-        raise ValueError(f"resume must be exactly one page; found {len(reader.pages)}")
-    page = reader.pages[0]
-    width, height = float(page.mediabox.width), float(page.mediabox.height)
-    if abs(width - _A4_WIDTH_POINTS) > _A4_TOLERANCE_POINTS or abs(height - _A4_HEIGHT_POINTS) > _A4_TOLERANCE_POINTS:
-        raise ValueError(f"resume page is not A4: {width:.2f} x {height:.2f} points")
-    text = page.extract_text() or ""
+    page_count = len(reader.pages)
+    if not 1 <= page_count <= _MAX_RESUME_PAGES:
+        raise ValueError(f"resume must be between one and two pages; found {page_count}")
+
+    extracted_pages: list[str] = []
+    for page in reader.pages:
+        width, height = float(page.mediabox.width), float(page.mediabox.height)
+        if abs(width - _A4_WIDTH_POINTS) > _A4_TOLERANCE_POINTS or abs(height - _A4_HEIGHT_POINTS) > _A4_TOLERANCE_POINTS:
+            raise ValueError(f"resume page is not A4: {width:.2f} x {height:.2f} points")
+        extracted_pages.append(page.extract_text() or "")
+
+    text = "\n".join(extracted_pages)
     if candidate_name not in text:
         raise ValueError("resume PDF does not contain the canonical candidate name")
     if any(marker in text.casefold() for marker in _INTERNAL_MARKERS):
         raise ValueError("internal Career OS branding leaked into rendered resume PDF")
-    return {"page_count": 1, "page_width_points": width, "page_height_points": height, "text_length": len(text)}
+    return {
+        "page_count": page_count,
+        "page_limit": _MAX_RESUME_PAGES,
+        "page_width_points": float(reader.pages[0].mediabox.width),
+        "page_height_points": float(reader.pages[0].mediabox.height),
+        "text_length": len(text),
+    }
