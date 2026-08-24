@@ -28,6 +28,8 @@ class FitScore:
     preferred_gaps: tuple[str, ...] = field(default_factory=tuple)
     evidence_claim_ids: tuple[str, ...] = field(default_factory=tuple)
     recommendation: str = "weak_fit"
+    education_gaps: tuple[str, ...] = field(default_factory=tuple)
+    education_risk: str = "none"
 
     def __post_init__(self) -> None:
         for value in (self.overall, self.hard_requirements, self.preferred_requirements, self.skills):
@@ -44,4 +46,6 @@ class FitScore:
             "preferred_gaps": list(self.preferred_gaps),
             "evidence_claim_ids": list(self.evidence_claim_ids),
             "recommendation": self.recommendation,
+            "education_gaps": list(self.education_gaps),
+            "education_risk": self.education_risk,
         }
