@@ -37,6 +37,7 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 1
           persist-credentials: false
+
       - name: Verify exact triggering commit
         shell: bash
         env:
@@ -46,27 +47,65 @@ jobs:
           ACTUAL_SHA="$(git rev-parse HEAD)"
           test "$ACTUAL_SHA" = "$EXPECTED_SHA"
           echo "Verified exact commit: $ACTUAL_SHA"
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+
       - name: Install Career OS
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+
       - name: Install Chromium for browser-backed departments
         shell: bash
         run: python -m playwright install --with-deps chromium
+
+      - name: Process queued Notion jobs
+        id: notion-worker
+        continue-on-error: true
+        shell: bash
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID }}
+          CAREER_OS_MAX_JOBS: "10"
+          CAREER_OS_NOTION_PAGE_SIZE: "25"
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          python scripts/notion_job_worker.py
+
+      - name: Publish Notion worker report
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f .career-os/notion-worker-report.json ]]; then
+            {
+              echo '## Career OS Notion worker'
+              echo
+              echo '```json'
+              cat .career-os/notion-worker-report.json
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '## Career OS Notion worker' >> "$GITHUB_STEP_SUMMARY"
+            echo 'No worker report was produced.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Run provider-free real-job smoke cycle
         id: smoke
+        if: always()
         shell: bash
         env:
           PYTHONPATH: src
         run: |
           set -euo pipefail
           python scripts/native_job_smoke_test.py
+
       - name: Verify native cycle artifacts exist
         if: always()
         shell: bash
@@ -75,6 +114,17 @@ jobs:
           test -s .career-os/native-smoke-result.json
           test -s .career-os/resume/*.pdf
           test -s .career-os/resume/*.html
+
+      - name: Verify systemic Notion worker health
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f .career-os/notion-worker-report.json ]] && grep -q '"error"' .career-os/notion-worker-report.json; then
+            echo 'Systemic Notion worker failure detected; failing the cycle after the smoke test completed.'
+            exit 1
+          fi
+
       - name: Publish native cycle result
         if: always()
         shell: bash
@@ -91,11 +141,15 @@ jobs:
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
-      - name: Upload native cycle artifacts
+
+      - name: Upload Career OS cycle artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: career-os-native-smoke
-          path: .career-os/
-          if-no-files-found: error
+          name: career-os-cycle-reports
+          path: |
+            .career-os/native-smoke-result.json
+            .career-os/notion-worker-report.json
+            .career-os/resume/
+          if-no-files-found: warn
           include-hidden-files: true
