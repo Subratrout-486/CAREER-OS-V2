@@ -65,3 +65,46 @@ def test_resume_pdf_is_one_page_a4_and_machine_readable(tmp_path) -> None:
     assert abs(float(result["page_width_points"]) - 595.28) < 2
     assert abs(float(result["page_height_points"]) - 841.89) < 2
     assert int(result["text_length"]) > 100
+
+
+def test_resume_pdf_accepts_two_pages_when_content_requires_it(tmp_path) -> None:
+    """Use the first stable fixture size that renders to exactly two pages."""
+    from pypdf import PdfReader
+
+    profile = _profile()
+    output = tmp_path / "Subrat_Rout_Product_Support_Engineer.pdf"
+    two_page_count = None
+    for count in range(18, 36):
+        responsibilities = [
+            f"Supported enterprise workforce management workflow {i}: investigated incidents, validated data, coordinated resolution, and documented the result."
+            for i in range(1, count + 1)
+        ]
+        profile["experience"] = [
+            {
+                "company": "FactSet Systems",
+                "title": "Product Support Engineer",
+                "dates": "Nov 2024 – Jan 2026",
+                "responsibilities": responsibilities,
+            }
+        ]
+        bullets = tuple(
+            ResumeBullet(text, (f"exp-factset-systems-{i}",))
+            for i, text in enumerate(responsibilities)
+        )
+        tailored = TailoredResume(
+            summary="Production support engineer.",
+            bullets=bullets,
+            matched_keywords=("sql",),
+        )
+        html = render_resume_html(profile, tailored, target_role="Product Support Engineer")
+        render_resume_pdf(html, output)
+        if len(PdfReader(str(output)).pages) == 2:
+            two_page_count = count
+            break
+
+    assert two_page_count is not None, "test fixture must produce a genuine two-page resume"
+    result = validate_resume_pdf(output, "Subrat Rout")
+    assert result["page_count"] == 2
+    assert abs(float(result["page_width_points"]) - 595.28) < 2
+    assert abs(float(result["page_height_points"]) - 841.89) < 2
+    assert int(result["text_length"]) > 100
