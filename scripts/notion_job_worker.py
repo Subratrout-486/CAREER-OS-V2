@@ -32,6 +32,7 @@ DEFAULT_DATA_SOURCE_ID = "8374c380-f148-41ab-a77f-eb35de20f2db"
 MAX_JOBS = max(1, int(os.environ.get("CAREER_OS_MAX_JOBS", "10")))
 PAGE_SIZE = min(max(1, int(os.environ.get("CAREER_OS_NOTION_PAGE_SIZE", "25"))), 100)
 MAX_RETRIES = max(1, int(os.environ.get("CAREER_OS_NOTION_MAX_RETRIES", "5")))
+MIN_REQUEST_INTERVAL = max(0.0, float(os.environ.get("CAREER_OS_NOTION_MIN_REQUEST_INTERVAL", "0.35")))
 REPORT_PATH = ROOT / ".career-os" / "notion-worker-report.json"
 
 QUEUE_STAGES = {
@@ -39,7 +40,22 @@ QUEUE_STAGES = {
 }
 TERMINAL_STAGES = {"Ready to Apply", "Applied", "Blocked"}
 TERMINAL_STATUSES = {"Applied", "Rejected", "Closed"}
-RETRYABLE_HTTP = {429, 500, 502, 503, 504}
+# 429/5xx are documented transient failures; 409/425/529 can also be transient
+# service/concurrency responses and are safe to retry for idempotent reads and
+# our small, bounded state writes. Authentication/permission errors are never retried.
+RETRYABLE_HTTP = {408, 409, 425, 429, 500, 502, 503, 504, 529}
+_LAST_REQUEST_AT = 0.0
+
+
+def _pace_request() -> None:
+    global _LAST_REQUEST_AT
+    if MIN_REQUEST_INTERVAL <= 0:
+        return
+    now = time.monotonic()
+    delay = MIN_REQUEST_INTERVAL - (now - _LAST_REQUEST_AT)
+    if delay > 0:
+        time.sleep(delay)
+    _LAST_REQUEST_AT = time.monotonic()
 
 
 def _sleep_for_retry(attempt: int, retry_after: str | None = None) -> None:
@@ -60,6 +76,7 @@ def notion_request(method: str, path: str, body: dict[str, Any] | None = None) -
     payload = None if body is None else json.dumps(body).encode("utf-8")
     last_error: Exception | None = None
     for attempt in range(MAX_RETRIES):
+        _pace_request()
         request = Request(
             "https://api.notion.com/v1" + path,
             data=payload,
@@ -136,10 +153,13 @@ def claims_from_profile(profile: dict[str, Any]) -> tuple[list[EvidenceClaim], R
 
 def update_page(page_id: str, updates: dict[str, Any]) -> None:
     properties: dict[str, Any] = {}
-    select_properties = {"Processing Stage", "Resume Status", "Fit Decision", "Role Family", "Status"}
+    select_properties = {"Processing Stage", "Resume Status", "Fit Decision", "Role Family"}
+    status_properties = {"Status"}
     for name, value in updates.items():
         if name in select_properties:
             properties[name] = {"select": {"name": value}} if value else {"select": None}
+        elif name in status_properties:
+            properties[name] = {"status": {"name": value}} if value else {"status": None}
         elif name == "Fit Score":
             properties[name] = {"number": float(value) if value is not None else None}
         elif name in {"Job URL", "Application URL", "Resume URL"}:
