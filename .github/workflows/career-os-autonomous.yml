@@ -15,10 +15,6 @@ concurrency:
   group: career-os-autonomous-loop
   cancel-in-progress: false
 
-permissions:
-  contents: read
-  actions: read
-
 jobs:
   autonomous-cycle:
     if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
@@ -64,7 +60,7 @@ jobs:
         shell: bash
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID || '8374c380-f148-41ab-a77f-eb35de20f2db' }}
           CAREER_OS_MAX_JOBS: "10"
           CAREER_OS_NOTION_PAGE_SIZE: "25"
           PYTHONPATH: src
@@ -79,7 +75,7 @@ jobs:
         shell: bash
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID || '8374c380-f148-41ab-a77f-eb35de20f2db' }}
           CAREER_OS_MAX_JOBS: "10"
           PYTHONPATH: src
         run: |
