@@ -11,15 +11,15 @@ worker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(worker)
 
 
-def page(job: str, stage: str | None = None, status: str | None = None):
-    return {
-        "id": f"page-{job}",
-        "properties": {
-            "Job": {"type": "title", "title": [{"plain_text": job}]},
-            "Processing Stage": {"type": "select", "select": {"name": stage} if stage else None},
-            "Status": {"type": "select", "select": {"name": status} if status else None},
-        },
+def page(job: str, stage: str | None = None, status: str | None = None, jd: str | None = None):
+    properties = {
+        "Job": {"type": "title", "title": [{"plain_text": job}]},
+        "Processing Stage": {"type": "select", "select": {"name": stage} if stage else None},
+        "Status": {"type": "select", "select": {"name": status} if status else None},
     }
+    if jd is not None:
+        properties["JD"] = {"type": "rich_text", "rich_text": [{"plain_text": jd}]}
+    return {"id": f"page-{job}", "properties": properties}
 
 
 def test_blank_stage_is_queued_but_terminal_status_is_not(monkeypatch):
@@ -36,9 +36,7 @@ def test_blank_stage_is_queued_but_terminal_status_is_not(monkeypatch):
             "has_more": False,
         },
     )
-
     jobs = worker.fetch_queued()
-
     assert [worker.prop(item, "Job") for item in jobs] == ["New manual job", "Verified job"]
 
 
@@ -56,9 +54,7 @@ def test_terminal_processing_stages_are_not_requeued(monkeypatch):
             "has_more": False,
         },
     )
-
     jobs = worker.fetch_queued()
-
     assert [worker.prop(item, "Job") for item in jobs] == ["New"]
 
 
@@ -77,9 +73,7 @@ def test_data_source_query_endpoint_and_pagination(monkeypatch):
 
     monkeypatch.setattr(worker, "notion_request", fake_request)
     monkeypatch.setattr(worker, "MAX_JOBS", 1)
-
     jobs = worker.fetch_queued()
-
     assert len(calls) == 2
     assert calls[0][0] == "POST"
     assert calls[0][1].endswith("/data_sources/8374c380f14841aba77feb35de20f2db/query")
@@ -102,9 +96,10 @@ def test_process_failure_is_isolated(monkeypatch):
 
     monkeypatch.setattr(worker, "CareerPipeline", fail_pipeline)
     monkeypatch.setattr(worker, "update_page", lambda page_id, values: updates.append((page_id, values)))
-
-    ok, message = worker.process(page("Broken", "Discovered", "Verified Active"), {"candidate": {"professional_summary": "x"}})
-
+    ok, message = worker.process(
+        page("Broken", "Discovered", "Verified Active", jd="A real job description"),
+        {"candidate": {"professional_summary": "x"}},
+    )
     assert ok is False
     assert "synthetic pipeline failure" in message
     assert updates[-1][1]["Processing Stage"] == "Blocked"
