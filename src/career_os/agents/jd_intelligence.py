@@ -105,7 +105,12 @@ class JDIntelligence:
         hard = []
         for line in candidates:
             low = line.casefold()
-            objective = any(token in low for token in ("degree", "education", "year of", "years' experience", "years of experience", "experience is required"))
+            objective = (
+                any(token in low for token in ("degree", "education", "experience is required"))
+                or bool(re.search(r"\b\d+\s*\+?\s*years?\b.*\bexperience\b", low))
+                or bool(re.search(r"\b\d+\s*[-–]\s*\d+\s*years?\b.*\bexperience\b", low))
+                or bool(re.search(r"\b\d+\s*[-–]\s*\d+\s*year\b.*\bexperience\b", low))
+            )
             technical = any(_contains_term(low, alias) for aliases in _SKILL_ALIASES.values() for alias in aliases)
             if objective or technical:
                 hard.append(line)
