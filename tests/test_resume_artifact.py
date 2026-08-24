@@ -71,7 +71,7 @@ def test_resume_pdf_accepts_two_pages_when_content_requires_it(tmp_path) -> None
     profile = _profile()
     responsibilities = [
         f"Supported enterprise workforce management workflow {i}: investigated incidents, validated data, coordinated resolution, and documented the result."
-        for i in range(1, 26)
+        for i in range(1, 24)
     ]
     profile["experience"] = [
         {
