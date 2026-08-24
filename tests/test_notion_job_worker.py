@@ -112,7 +112,8 @@ def test_pacing_waits_between_requests(monkeypatch):
     worker._LAST_REQUEST_AT = 0.0
     worker._pace_request()
     worker._pace_request()
-    assert sleeps == [0.25]
+    assert len(sleeps) == 1
+    assert abs(sleeps[0] - 0.25) < 1e-9
 
 
 def test_process_failure_is_isolated(monkeypatch):
