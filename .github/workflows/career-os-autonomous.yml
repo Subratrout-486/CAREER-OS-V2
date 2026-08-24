@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   repository_dispatch:
     types: [career-os-continue]
+  pull_request:
+    branches: [main]
   schedule:
     - cron: "17 * * * *"
   workflow_run:
@@ -32,13 +34,13 @@ jobs:
       - name: Check out exact triggering commit
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 1
           persist-credentials: false
       - name: Verify exact triggering commit
         shell: bash
         env:
-          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
           ACTUAL_SHA="$(git rev-parse HEAD)"
@@ -82,7 +84,7 @@ jobs:
             {
               echo '## Career OS native cycle'
               echo
-              echo 'Provider-independent job ingestion, deterministic pipeline execution, and candidate-facing resume generation completed on the exact CI-verified commit.'
+              echo 'Provider-independent job ingestion, deterministic pipeline execution, and candidate-facing resume generation completed on the exact triggering commit.'
               echo
               echo '```json'
               cat .career-os/native-smoke-result.json
