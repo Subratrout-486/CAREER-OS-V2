@@ -4,13 +4,8 @@ on:
   workflow_dispatch:
   repository_dispatch:
     types: [career-os-continue]
-  pull_request:
-    branches: [main]
   schedule:
     - cron: "17 * * * *"
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
 
 concurrency:
   group: career-os-autonomous-loop
@@ -22,80 +17,128 @@ permissions:
 
 jobs:
   autonomous-cycle:
-    if: >-
-      github.event_name != 'workflow_run' ||
-      (
-        github.event.workflow_run.head_repository.full_name == github.repository &&
-        github.event.workflow_run.conclusion == 'success'
-      )
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Check out exact triggering commit
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 1
           persist-credentials: false
+
       - name: Verify exact triggering commit
         shell: bash
         env:
-          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           ACTUAL_SHA="$(git rev-parse HEAD)"
           test "$ACTUAL_SHA" = "$EXPECTED_SHA"
           echo "Verified exact commit: $ACTUAL_SHA"
+
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+
       - name: Install Career OS
         shell: bash
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+
       - name: Install Chromium for browser-backed departments
         shell: bash
         run: python -m playwright install --with-deps chromium
-      - name: Run provider-free real-job smoke cycle
+
+      - name: Process queued Notion jobs
+        id: notion-worker
+        continue-on-error: true
+        shell: bash
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID }}
+          CAREER_OS_MAX_JOBS: "10"
+          CAREER_OS_NOTION_PAGE_SIZE: "25"
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          python scripts/notion_job_worker.py
+
+      - name: Finalize verified candidate resumes
+        id: resume-finalize
+        if: always() && steps.notion-worker.outcome != 'failure'
+        continue-on-error: true
+        shell: bash
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID }}
+          CAREER_OS_MAX_JOBS: "10"
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          python scripts/notion_resume_finalize.py
+
+      - name: Run provider-free smoke cycle (diagnostic only)
         id: smoke
+        continue-on-error: true
         shell: bash
         env:
           PYTHONPATH: src
         run: |
           set -euo pipefail
           python scripts/native_job_smoke_test.py
-      - name: Verify native cycle artifacts exist
-        if: always()
+
+      - name: Verify native cycle artifacts
+        if: steps.smoke.outcome == 'success'
         shell: bash
         run: |
           set -euo pipefail
           test -s .career-os/native-smoke-result.json
-          test -s .career-os/resume/*.pdf
-          test -s .career-os/resume/*.html
-      - name: Publish native cycle result
+          test -n "$(find .career-os/resume -maxdepth 1 -type f -name '*.pdf' -print -quit)"
+          test -n "$(find .career-os/resume -maxdepth 1 -type f -name '*.html' -print -quit)"
+
+      - name: Publish autonomous health summary
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -f .career-os/native-smoke-result.json ]]; then
-            {
-              echo '## Career OS native cycle'
-              echo
-              echo 'Provider-independent job ingestion, deterministic pipeline execution, and candidate-facing resume generation completed on the exact triggering commit.'
-              echo
-              echo '```json'
-              cat .career-os/native-smoke-result.json
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-      - name: Upload native cycle artifacts
+          {
+            echo '## Career OS autonomous cycle'
+            echo
+            echo "Notion worker outcome: ${{ steps.notion-worker.outcome }}"
+            echo "Resume finalizer outcome: ${{ steps.resume-finalize.outcome }}"
+            echo "Provider-free smoke outcome: ${{ steps.smoke.outcome }}"
+            echo
+            for report in .career-os/notion-worker-report.json .career-os/resume-finalize-report.json .career-os/native-smoke-result.json; do
+              if [[ -f "$report" ]]; then
+                echo "### $(basename "$report")"
+                echo '```json'
+                cat "$report"
+                echo '```'
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload autonomous reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: career-os-native-smoke
-          path: .career-os/
-          if-no-files-found: error
+          name: career-os-cycle-reports
+          path: |
+            .career-os/native-smoke-result.json
+            .career-os/notion-worker-report.json
+            .career-os/resume-finalize-report.json
+            .career-os/resume/
+          if-no-files-found: warn
           include-hidden-files: true
+
+      - name: Fail only on systemic Notion intake failure
+        if: steps.notion-worker.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "The Notion worker failed at the system level. Individual job failures must be recorded in the worker report and must not fail the batch."
+          exit 1

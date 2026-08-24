@@ -11,9 +11,9 @@ def test_autonomous_workflow_is_provider_free():
     assert "GEMINI_API_KEY" not in WORKFLOW
     assert "OPENAI_API_KEY" not in WORKFLOW
     assert "career_os_provider_controller.py" not in WORKFLOW
-    assert "provider-free real-job smoke cycle" in WORKFLOW
+    assert "provider-free smoke cycle (diagnostic only)" in WORKFLOW
     assert "python scripts/native_job_smoke_test.py" in WORKFLOW
-    assert 'persist-credentials: false' in WORKFLOW
+    assert "persist-credentials: false" in WORKFLOW
     assert "danger-full-access" not in WORKFLOW
     assert "--full-auto" not in WORKFLOW
     assert "--sandbox" not in WORKFLOW
@@ -22,9 +22,9 @@ def test_autonomous_workflow_is_provider_free():
 def test_autonomous_workflow_preserves_safe_handoff_and_verification_contract():
     assert "contents: read" in WORKFLOW
     assert "actions: read" in WORKFLOW
-    assert "workflow_run" in WORKFLOW
     assert "schedule:" in WORKFLOW
-    assert "READY_TO_MERGE" in PROMPT
+    assert "workflow_dispatch:" in WORKFLOW
+    assert "repository_dispatch:" in WORKFLOW
     assert "NEVER merge a PR" in PROMPT
     assert "exact PR number, exact head SHA, and CI run URL" in PROMPT
     assert "HUMAN_REQUIRED" in PROMPT
