@@ -4,6 +4,8 @@ on:
   workflow_dispatch:
   repository_dispatch:
     types: [career-os-continue]
+  pull_request:
+    branches: [main]
   schedule:
     - cron: "17 * * * *"
   workflow_run:
@@ -22,15 +24,28 @@ jobs:
   autonomous-cycle:
     if: >-
       github.event_name != 'workflow_run' ||
-      github.event.workflow_run.head_repository.full_name == github.repository
+      (
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        github.event.workflow_run.conclusion == 'success'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Check out repository
+      - name: Check out exact triggering commit
         uses: actions/checkout@v5
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 1
           persist-credentials: false
+      - name: Verify exact triggering commit
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          test "$ACTUAL_SHA" = "$EXPECTED_SHA"
+          echo "Verified exact commit: $ACTUAL_SHA"
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -52,12 +67,14 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/native_job_smoke_test.py
-      - name: Verify native cycle artifact exists
+      - name: Verify native cycle artifacts exist
         if: always()
         shell: bash
         run: |
           set -euo pipefail
           test -s .career-os/native-smoke-result.json
+          test -s .career-os/resume/*.pdf
+          test -s .career-os/resume/*.html
       - name: Publish native cycle result
         if: always()
         shell: bash
@@ -67,17 +84,18 @@ jobs:
             {
               echo '## Career OS native cycle'
               echo
-              echo 'Provider-independent job ingestion and deterministic pipeline execution completed.'
+              echo 'Provider-independent job ingestion, deterministic pipeline execution, and candidate-facing resume generation completed on the exact triggering commit.'
               echo
               echo '```json'
               cat .career-os/native-smoke-result.json
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           fi
-      - name: Upload native cycle artifact
+      - name: Upload native cycle artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: career-os-native-smoke
-          path: .career-os/native-smoke-result.json
+          path: .career-os/
           if-no-files-found: error
+          include-hidden-files: true
