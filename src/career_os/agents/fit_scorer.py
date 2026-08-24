@@ -21,6 +21,10 @@ _TECHNICAL_ALIASES = {
     "salesforce": ("salesforce",), "jira": ("jira",), "rest api": ("rest api", "rest apis", "restful api", "restful apis"),
 }
 
+_EDUCATION_PATTERNS = (
+    r"\b(?:bachelor|bachelors|master|masters|phd|doctorate|degree|b\.?tech|b\.?e\.?|m\.?tech|m\.?e\.?|b\.?sc|b\.?com|m\.?sc|m\.?com|mba|computer science|engineering degree)\b",
+)
+
 
 def _canonical_text(text: str) -> str:
     value = text.casefold()
@@ -31,6 +35,11 @@ def _canonical_text(text: str) -> str:
 
 def _terms(text: str) -> set[str]:
     return {token for token in re.findall(r"[a-z0-9+#.-]+", _canonical_text(text)) if len(token) > 2 and token not in _STOPWORDS}
+
+
+def _is_education_requirement(requirement: str) -> bool:
+    low = _canonical_text(requirement)
+    return any(re.search(pattern, low) for pattern in _EDUCATION_PATTERNS)
 
 
 def _focused_terms(requirement: str) -> set[str]:
@@ -63,8 +72,6 @@ def _evidence_match(requirement: str, claims: tuple[EvidenceClaim, ...]) -> Requ
     if not required:
         return RequirementEvaluation(requirement, RequirementStatus.MISSING)
 
-    # Objective requirements such as degree/experience and named technologies are
-    # matched against their semantic core, not against every word in the sentence.
     focused_candidates: list[tuple[EvidenceClaim, float]] = []
     for claim in claims:
         if claim.support not in {SupportStatus.SUPPORTED, SupportStatus.PARTIALLY_SUPPORTED}:
@@ -80,7 +87,6 @@ def _evidence_match(requirement: str, claims: tuple[EvidenceClaim, ...]) -> Requ
             confidence=1.0,
         )
 
-    # Generic requirements still receive conservative token-overlap partial credit.
     candidates: list[tuple[EvidenceClaim, float]] = []
     for claim in claims:
         if claim.support not in {SupportStatus.SUPPORTED, SupportStatus.PARTIALLY_SUPPORTED}:
@@ -98,15 +104,23 @@ def _evidence_match(requirement: str, claims: tuple[EvidenceClaim, ...]) -> Requ
 
 
 class FitScorer:
-    """Deterministically scores JD requirements against an evidence ledger."""
+    """Deterministically scores JD requirements against an evidence ledger.
+
+    Education mismatches are retained as transparent risk signals but are not
+    hard gates or scoring penalties. This avoids rejecting otherwise qualified
+    candidates solely because a JD names a preferred/required degree.
+    """
 
     name = "fit_scorer"
 
     def score(self, jd: JDAnalysis, ledger: EvidenceLedger) -> FitScore:
         claims = ledger.claims
-        hard = tuple(_evidence_match(req, claims) for req in jd.must_have_requirements)
+        hard_all = tuple(_evidence_match(req, claims) for req in jd.must_have_requirements)
         preferred = tuple(_evidence_match(req, claims) for req in jd.preferred_requirements)
         skills = tuple(_evidence_match(skill, claims) for skill in jd.skills)
+
+        education = tuple(e for e in hard_all if _is_education_requirement(e.requirement))
+        hard = tuple(e for e in hard_all if not _is_education_requirement(e.requirement))
 
         def component(evaluations: tuple[RequirementEvaluation, ...]) -> float:
             if not evaluations:
@@ -121,7 +135,20 @@ class FitScorer:
 
         hard_gaps = tuple(e.requirement for e in hard if e.status is not RequirementStatus.MATCHED)
         preferred_gaps = tuple(e.requirement for e in preferred if e.status is RequirementStatus.MISSING)
-        evidence_ids = tuple(dict.fromkeys(claim_id for evaluation in (*hard, *preferred, *skills) for claim_id in evaluation.evidence_claim_ids))
+        education_gaps = tuple(e.requirement for e in education if e.status is not RequirementStatus.MATCHED)
+        education_risk = "mismatch" if education_gaps else "matched" if education else "not_stated"
+        evidence_ids = tuple(dict.fromkeys(claim_id for evaluation in (*hard_all, *preferred, *skills) for claim_id in evaluation.evidence_claim_ids))
         recommendation = "hard_gap" if hard_gaps else ("strong_fit" if overall >= 80 else "moderate_fit" if overall >= 60 else "weak_fit")
 
-        return FitScore(overall, hard_score, preferred_score, skill_score, hard_gaps, preferred_gaps, evidence_ids, recommendation)
+        return FitScore(
+            overall,
+            hard_score,
+            preferred_score,
+            skill_score,
+            hard_gaps,
+            preferred_gaps,
+            evidence_ids,
+            recommendation,
+            education_gaps,
+            education_risk,
+        )
