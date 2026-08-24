@@ -7,14 +7,15 @@ import os
 import time
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from urllib.request import Request, urlopen
 
 from career_os.candidate_profile import load_candidate_source_of_truth
+from career_os.models.resume import ResumeBullet, TailoredResume
 from career_os.resume_artifact import render_resume_html, render_resume_pdf, resume_filename, validate_resume_pdf
-from career_os.pipeline import CareerPipeline
 
-from notion_job_worker import MAX_JOBS, NOTION_VERSION, prop, notion_request, fetch_queued, claims_from_profile
+from notion_job_worker import MAX_JOBS, NOTION_VERSION, prop, notion_request, fetch_queued
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / ".career-os" / "resume"
@@ -99,6 +100,44 @@ def update_page(page_id: str, updates: dict[str, Any]) -> None:
     notion_request("PATCH", f"/pages/{page_id}", {"properties": properties})
 
 
+def load_completed_result(checkpoint: Path) -> Any:
+    """Rehydrate the completed pipeline artifacts without rerunning the pipeline."""
+    if not checkpoint.exists():
+        raise FileNotFoundError(f"pipeline checkpoint not found: {checkpoint}")
+    payload = json.loads(checkpoint.read_text(encoding="utf-8"))
+    if payload.get("status") != "completed":
+        raise RuntimeError(f"pipeline checkpoint is not completed: {payload.get('status')}")
+    artifacts = payload.get("artifacts", {})
+    required = {"job_intake", "resume_tailoring", "fit_scoring", "ats_audit", "application_readiness"}
+    missing = sorted(required - artifacts.keys())
+    if missing:
+        raise RuntimeError(f"completed pipeline checkpoint is missing artifacts: {', '.join(missing)}")
+
+    tailored_data = artifacts["resume_tailoring"]
+    tailored = TailoredResume(
+        summary=str(tailored_data.get("summary", "")),
+        bullets=tuple(
+            ResumeBullet(str(bullet.get("text", "")), tuple(bullet.get("evidence_claim_ids", [])))
+            for bullet in tailored_data.get("bullets", [])
+        ),
+        matched_keywords=tuple(tailored_data.get("matched_keywords", [])),
+        omitted_claim_ids=tuple(tailored_data.get("omitted_claim_ids", [])),
+        edit_trace=tuple(tailored_data.get("edit_trace", [])),
+    )
+    fit = SimpleNamespace(**artifacts["fit_scoring"])
+    ats_findings = tuple(SimpleNamespace(**finding) for finding in artifacts["ats_audit"].get("findings", []))
+    ats_audit = SimpleNamespace(findings=ats_findings)
+    application_ready = bool(artifacts["application_readiness"].get("ready", False))
+    job = SimpleNamespace(title=str(artifacts["job_intake"].get("title", "Untitled job")))
+    return SimpleNamespace(
+        job=job,
+        tailored_resume=tailored,
+        fit=fit,
+        ats_audit=ats_audit,
+        application_ready=application_ready,
+    )
+
+
 def finalize(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
     page_id = page["id"]
     title = prop(page, "Job") or "Untitled job"
@@ -109,16 +148,7 @@ def finalize(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
 
     run_id = "notion-" + "-".join(x for x in [company, title] if x).casefold().replace(" ", "-")[:90] + "-" + page_id.replace("-", "")[:8]
     checkpoint = ROOT / ".career-os" / "runs" / f"{run_id}.json"
-    claims, resume = claims_from_profile(profile)
-    raw_job = {
-        "company": company,
-        "title": title,
-        "location": prop(page, "Location"),
-        "source_url": prop(page, "Job URL") or prop(page, "Application URL"),
-        "source": prop(page, "Source") or "Notion",
-        "description": description,
-    }
-    result = CareerPipeline(checkpoint).run(run_id=run_id, raw_job=raw_job, resume=resume, claims=claims)
+    result = load_completed_result(checkpoint)
 
     OUT.mkdir(parents=True, exist_ok=True)
     candidate = profile["candidate"]
@@ -128,7 +158,6 @@ def finalize(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
     html_path.write_text(render_resume_html(profile, result.tailored_resume, target_role=result.job.title), encoding="utf-8")
     render_resume_pdf(html_path.read_text(encoding="utf-8"), pdf_path)
     validation = validate_resume_pdf(pdf_path, str(candidate["name"]))
-    # validate_resume_pdf raises on invalid artifacts and returns metadata on success.
     upload_id = upload_pdf(pdf_path)
     attach_pdf(page_id, upload_id, filename)
 
@@ -137,7 +166,7 @@ def finalize(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
     blockers = "; ".join(str(x) for x in hard_gaps) if hard_gaps else "; ".join(str(getattr(x, "message", x)) for x in findings)[:1900]
     ready = bool(result.application_ready) and not findings
     update_page(page_id, {
-        "Processing Stage": "Ready to Apply" if ready else "Recruiter Review",
+        "Processing Stage": "Ready to Apply" if ready else "Resume Finalized",
         "Status": "Ready to Apply" if ready else "Shortlisted",
         "Resume Status": "Ready" if ready else "Needs Review",
         "Fit Score": getattr(result.fit, "score", None),
