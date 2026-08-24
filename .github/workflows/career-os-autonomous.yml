@@ -4,6 +4,10 @@ on:
   workflow_dispatch:
   repository_dispatch:
     types: [career-os-continue]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   schedule:
     - cron: "17 * * * *"
 
@@ -17,6 +21,7 @@ permissions:
 
 jobs:
   autonomous-cycle:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -108,6 +113,8 @@ jobs:
           {
             echo '## Career OS autonomous cycle'
             echo
+            echo "Trigger: ${{ github.event_name }}"
+            echo "Commit: ${{ github.sha }}"
             echo "Notion worker outcome: ${{ steps.notion-worker.outcome }}"
             echo "Resume finalizer outcome: ${{ steps.resume-finalize.outcome }}"
             echo "Provider-free smoke outcome: ${{ steps.smoke.outcome }}"
@@ -131,6 +138,7 @@ jobs:
             .career-os/native-smoke-result.json
             .career-os/notion-worker-report.json
             .career-os/resume-finalize-report.json
+            .career-os/native-smoke-result.json
             .career-os/resume/
           if-no-files-found: warn
           include-hidden-files: true
