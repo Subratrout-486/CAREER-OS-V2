@@ -24,7 +24,9 @@ _TECHNICAL_ALIASES = {
 # Education detection requires degree context so domain terms such as
 # "Master Data Management" remain ordinary job requirements.
 _EDUCATION_PATTERNS = (
-    r"\b(?:bachelor(?:'s|s)?|phd|doctorate|b\.?tech|b\.?e\.?|b\.?sc|b\.?com|m\.?tech|m\.?e\.?|m\.?sc|m\.?com|mba)\b",
+    r"\b(?:bachelor(?:'s|s)?|phd|doctorate|b\.?tech|b\.?sc|b\.?com|m\.?tech|m\.?sc|m\.?com|mba)\b",
+    r"\bb\.?e\.?\s+degree\b",
+    r"\bm\.?e\.?\s+degree\b",
     r"\bmaster(?:'s|s)?\s+(?:degree|of|in)\b",
     r"\b(?:associate|undergraduate|graduate)\s+degree\b",
     r"\bengineering\s+degree\b",
@@ -33,16 +35,19 @@ _EDUCATION_PATTERNS = (
 
 _EDUCATION_FAMILIES = (
     ("btech", "bachelor", (r"\bb\.?tech\b", r"\bbachelor(?:'s|s)?\s+of\s+technology\b")),
-    ("be", "bachelor", (r"\bb\.?e\.?\b", r"\bbachelor(?:'s|s)?\s+of\s+engineering\b")),
+    ("be", "bachelor", (r"\bb\.?e\.?\s+degree\b", r"\bbachelor(?:'s|s)?\s+of\s+engineering\b")),
     ("bcom", "bachelor", (r"\bb\.?com\b", r"\bbachelor(?:'s|s)?\s+of\s+commerce\b")),
     ("bsc", "bachelor", (r"\bb\.?sc\b", r"\bbachelor(?:'s|s)?\s+of\s+science\b")),
     ("mtech", "master", (r"\bm\.?tech\b", r"\bmaster(?:'s|s)?\s+of\s+technology\b")),
-    ("me", "master", (r"\bm\.?e\.?\b", r"\bmaster(?:'s|s)?\s+of\s+engineering\b")),
+    ("me", "master", (r"\bm\.?e\.?\s+degree\b", r"\bmaster(?:'s|s)?\s+of\s+engineering\b")),
     ("mcom", "master", (r"\bm\.?com\b", r"\bmaster(?:'s|s)?\s+of\s+commerce\b")),
     ("msc", "master", (r"\bm\.?sc\b", r"\bmaster(?:'s|s)?\s+of\s+science\b")),
     ("mba", "master", (r"\bmba\b", r"\bmaster(?:'s|s)?\s+of\s+business\s+administration\b")),
     ("bachelor", "bachelor", (r"\bbachelor(?:'s|s)?\b",)),
     ("master", "master", (r"\bmaster(?:'s|s)?\s+(?:degree|of|in)\b",)),
+    ("undergraduate", "bachelor", (r"\bundergraduate\s+degree\b",)),
+    ("engineering", "bachelor", (r"\bengineering\s+degree\b",)),
+    ("computer_science", "bachelor", (r"\bcomputer\s+science\s+degree\b",)),
     ("postgraduate", "postgraduate", (r"\bgraduate\s+degree\b", r"\bpostgraduate\b")),
     ("associate", "associate", (r"\bassociate\s+degree\b",)),
     ("phd", "phd", (r"\bphd\b", r"\bdoctorate\b")),
