@@ -21,14 +21,31 @@ _TECHNICAL_ALIASES = {
     "salesforce": ("salesforce",), "jira": ("jira",), "rest api": ("rest api", "rest apis", "restful api", "restful apis"),
 }
 
-# Require degree context for "master" so domain terms such as "Master Data Management"
-# are not mistaken for education requirements.
+# Education detection requires degree context so domain terms such as
+# "Master Data Management" remain ordinary job requirements.
 _EDUCATION_PATTERNS = (
     r"\b(?:bachelor(?:'s|s)?|phd|doctorate|b\.?tech|b\.?e\.?|m\.?tech|m\.?e\.?|b\.?sc|b\.?com|m\.?sc|m\.?com|mba)\b",
     r"\bmaster(?:'s|s)?\s+(?:degree|of|in)\b",
     r"\b(?:associate|undergraduate|graduate)\s+degree\b",
     r"\bengineering\s+degree\b",
     r"\bcomputer\s+science\s+degree\b",
+)
+
+_EDUCATION_FAMILIES = (
+    ("btech", (r"\bb\.?tech\b", r"\bbachelor(?:'s|s)?\s+of\s+technology\b")),
+    ("be", (r"\bb\.?e\.?\b", r"\bbachelor(?:'s|s)?\s+of\s+engineering\b")),
+    ("bcom", (r"\bb\.?com\b", r"\bbachelor(?:'s|s)?\s+of\s+commerce\b")),
+    ("bsc", (r"\bb\.?sc\b", r"\bbachelor(?:'s|s)?\s+of\s+science\b")),
+    ("mtech", (r"\bm\.?tech\b", r"\bmaster(?:'s|s)?\s+of\s+technology\b")),
+    ("me", (r"\bm\.?e\.?\b", r"\bmaster(?:'s|s)?\s+of\s+engineering\b")),
+    ("mcom", (r"\bm\.?com\b", r"\bmaster(?:'s|s)?\s+of\s+commerce\b")),
+    ("msc", (r"\bm\.?sc\b", r"\bmaster(?:'s|s)?\s+of\s+science\b")),
+    ("mba", (r"\bmba\b", r"\bmaster(?:'s|s)?\s+of\s+business\s+administration\b")),
+    ("bachelor", (r"\bbachelor(?:'s|s)?\b",)),
+    ("master", (r"\bmaster(?:'s|s)?\s+(?:degree|of|in)\b",)),
+    ("postgraduate", (r"\bgraduate\s+degree\b", r"\bpostgraduate\b")),
+    ("associate", (r"\bassociate\s+degree\b",)),
+    ("phd", (r"\bphd\b", r"\bdoctorate\b")),
 )
 
 
@@ -51,8 +68,17 @@ def _is_education_requirement(requirement: str) -> bool:
     return any(re.search(pattern, low) for pattern in _EDUCATION_PATTERNS)
 
 
+def _education_family(text: str) -> str | None:
+    """Return the most specific education family explicitly stated in text."""
+    low = _canonical_text(text)
+    for family, patterns in _EDUCATION_FAMILIES:
+        if any(re.search(pattern, low) for pattern in patterns):
+            return family
+    return None
+
+
 def _focused_terms(requirement: str) -> set[str]:
-    """Extract semantic matching keys for objective requirements."""
+    """Extract semantic matching keys for objective non-education requirements."""
     low = _canonical_text(requirement)
     focused: set[str] = set()
     for canonical, aliases in _TECHNICAL_ALIASES.items():
@@ -80,6 +106,21 @@ def _claim_supports_focus(claim: EvidenceClaim, focus: str) -> bool:
 
 def _evidence_match(requirement: str, claims: tuple[EvidenceClaim, ...]) -> RequirementEvaluation:
     """Match one requirement against supported evidence and return traceable results."""
+    if _is_education_requirement(requirement):
+        required_family = _education_family(requirement)
+        if required_family:
+            for claim in claims:
+                if claim.support not in {SupportStatus.SUPPORTED, SupportStatus.PARTIALLY_SUPPORTED}:
+                    continue
+                if _education_family(claim.claim) == required_family:
+                    return RequirementEvaluation(
+                        requirement=requirement,
+                        status=RequirementStatus.MATCHED,
+                        evidence_claim_ids=(claim.claim_id,),
+                        confidence=1.0,
+                    )
+        return RequirementEvaluation(requirement, RequirementStatus.MISSING)
+
     required = _focused_terms(requirement)
     if not required:
         return RequirementEvaluation(requirement, RequirementStatus.MISSING)
