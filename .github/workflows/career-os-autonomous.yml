@@ -98,3 +98,4 @@ jobs:
           name: career-os-native-smoke
           path: .career-os/
           if-no-files-found: error
+          include-hidden-files: true
