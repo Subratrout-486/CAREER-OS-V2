@@ -24,7 +24,7 @@ _TECHNICAL_ALIASES = {
 # Education detection requires degree context so domain terms such as
 # "Master Data Management" remain ordinary job requirements.
 _EDUCATION_PATTERNS = (
-    r"\b(?:bachelor(?:'s|s)?|phd|doctorate|b\.?tech|b\.?e\.?|m\.?tech|m\.?e\.?|b\.?sc|b\.?com|m\.?sc|m\.?com|mba)\b",
+    r"\b(?:bachelor(?:'s|s)?|phd|doctorate|b\.?tech|b\.?e\.?|b\.?sc|b\.?com|m\.?tech|m\.?e\.?|m\.?sc|m\.?com|mba)\b",
     r"\bmaster(?:'s|s)?\s+(?:degree|of|in)\b",
     r"\b(?:associate|undergraduate|graduate)\s+degree\b",
     r"\bengineering\s+degree\b",
@@ -32,20 +32,20 @@ _EDUCATION_PATTERNS = (
 )
 
 _EDUCATION_FAMILIES = (
-    ("btech", (r"\bb\.?tech\b", r"\bbachelor(?:'s|s)?\s+of\s+technology\b")),
-    ("be", (r"\bb\.?e\.?\b", r"\bbachelor(?:'s|s)?\s+of\s+engineering\b")),
-    ("bcom", (r"\bb\.?com\b", r"\bbachelor(?:'s|s)?\s+of\s+commerce\b")),
-    ("bsc", (r"\bb\.?sc\b", r"\bbachelor(?:'s|s)?\s+of\s+science\b")),
-    ("mtech", (r"\bm\.?tech\b", r"\bmaster(?:'s|s)?\s+of\s+technology\b")),
-    ("me", (r"\bm\.?e\.?\b", r"\bmaster(?:'s|s)?\s+of\s+engineering\b")),
-    ("mcom", (r"\bm\.?com\b", r"\bmaster(?:'s|s)?\s+of\s+commerce\b")),
-    ("msc", (r"\bm\.?sc\b", r"\bmaster(?:'s|s)?\s+of\s+science\b")),
-    ("mba", (r"\bmba\b", r"\bmaster(?:'s|s)?\s+of\s+business\s+administration\b")),
-    ("bachelor", (r"\bbachelor(?:'s|s)?\b",)),
-    ("master", (r"\bmaster(?:'s|s)?\s+(?:degree|of|in)\b",)),
-    ("postgraduate", (r"\bgraduate\s+degree\b", r"\bpostgraduate\b")),
-    ("associate", (r"\bassociate\s+degree\b",)),
-    ("phd", (r"\bphd\b", r"\bdoctorate\b")),
+    ("btech", "bachelor", (r"\bb\.?tech\b", r"\bbachelor(?:'s|s)?\s+of\s+technology\b")),
+    ("be", "bachelor", (r"\bb\.?e\.?\b", r"\bbachelor(?:'s|s)?\s+of\s+engineering\b")),
+    ("bcom", "bachelor", (r"\bb\.?com\b", r"\bbachelor(?:'s|s)?\s+of\s+commerce\b")),
+    ("bsc", "bachelor", (r"\bb\.?sc\b", r"\bbachelor(?:'s|s)?\s+of\s+science\b")),
+    ("mtech", "master", (r"\bm\.?tech\b", r"\bmaster(?:'s|s)?\s+of\s+technology\b")),
+    ("me", "master", (r"\bm\.?e\.?\b", r"\bmaster(?:'s|s)?\s+of\s+engineering\b")),
+    ("mcom", "master", (r"\bm\.?com\b", r"\bmaster(?:'s|s)?\s+of\s+commerce\b")),
+    ("msc", "master", (r"\bm\.?sc\b", r"\bmaster(?:'s|s)?\s+of\s+science\b")),
+    ("mba", "master", (r"\bmba\b", r"\bmaster(?:'s|s)?\s+of\s+business\s+administration\b")),
+    ("bachelor", "bachelor", (r"\bbachelor(?:'s|s)?\b",)),
+    ("master", "master", (r"\bmaster(?:'s|s)?\s+(?:degree|of|in)\b",)),
+    ("postgraduate", "postgraduate", (r"\bgraduate\s+degree\b", r"\bpostgraduate\b")),
+    ("associate", "associate", (r"\bassociate\s+degree\b",)),
+    ("phd", "phd", (r"\bphd\b", r"\bdoctorate\b")),
 )
 
 
@@ -68,13 +68,24 @@ def _is_education_requirement(requirement: str) -> bool:
     return any(re.search(pattern, low) for pattern in _EDUCATION_PATTERNS)
 
 
-def _education_family(text: str) -> str | None:
-    """Return the most specific education family explicitly stated in text."""
+def _education_descriptor(text: str) -> tuple[str | None, str | None]:
+    """Return (specific family, education level) for an explicitly stated degree."""
     low = _canonical_text(text)
-    for family, patterns in _EDUCATION_FAMILIES:
+    for family, level, patterns in _EDUCATION_FAMILIES:
         if any(re.search(pattern, low) for pattern in patterns):
-            return family
-    return None
+            return family, level
+    return None, None
+
+
+def _education_matches(requirement: str, claim: str) -> bool:
+    """Match education requirements by exact family when specific, or by level when generic."""
+    required_family, required_level = _education_descriptor(requirement)
+    claim_family, claim_level = _education_descriptor(claim)
+    if not required_level or not claim_level or required_level != claim_level:
+        return False
+    if required_family in {"bachelor", "master", "postgraduate", "associate", "phd"}:
+        return True
+    return required_family == claim_family
 
 
 def _focused_terms(requirement: str) -> set[str]:
@@ -107,18 +118,16 @@ def _claim_supports_focus(claim: EvidenceClaim, focus: str) -> bool:
 def _evidence_match(requirement: str, claims: tuple[EvidenceClaim, ...]) -> RequirementEvaluation:
     """Match one requirement against supported evidence and return traceable results."""
     if _is_education_requirement(requirement):
-        required_family = _education_family(requirement)
-        if required_family:
-            for claim in claims:
-                if claim.support not in {SupportStatus.SUPPORTED, SupportStatus.PARTIALLY_SUPPORTED}:
-                    continue
-                if _education_family(claim.claim) == required_family:
-                    return RequirementEvaluation(
-                        requirement=requirement,
-                        status=RequirementStatus.MATCHED,
-                        evidence_claim_ids=(claim.claim_id,),
-                        confidence=1.0,
-                    )
+        for claim in claims:
+            if claim.support not in {SupportStatus.SUPPORTED, SupportStatus.PARTIALLY_SUPPORTED}:
+                continue
+            if _education_matches(requirement, claim.claim):
+                return RequirementEvaluation(
+                    requirement=requirement,
+                    status=RequirementStatus.MATCHED,
+                    evidence_claim_ids=(claim.claim_id,),
+                    confidence=1.0,
+                )
         return RequirementEvaluation(requirement, RequirementStatus.MISSING)
 
     required = _focused_terms(requirement)
