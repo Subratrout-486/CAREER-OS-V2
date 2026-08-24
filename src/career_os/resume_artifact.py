@@ -16,6 +16,9 @@ from typing import Mapping, Sequence
 from career_os.models.resume import TailoredResume
 
 _INTERNAL_MARKERS = ("career os v2", "career-os-v2", "career_os_v2")
+_A4_WIDTH_POINTS = 595.28
+_A4_HEIGHT_POINTS = 841.89
+_A4_TOLERANCE_POINTS = 2.0
 
 
 def _slug(value: str) -> str:
@@ -42,15 +45,18 @@ def _claim_lookup(profile: Mapping[str, object]) -> dict[str, tuple[str, str, st
         if not isinstance(experience, Mapping):
             continue
         company = str(experience.get("company", ""))
-        title = str(experience.get("title", ""))
         for index, responsibility in enumerate(experience.get("responsibilities", [])):
-            lookup[f"exp-{company.casefold().replace(' ', '-')}-{index}"] = ("experience", company, str(responsibility))
+            lookup[f"exp-{company.casefold().replace(' ', '-')}-{index}"] = (
+                "experience", company, str(responsibility)
+            )
     for project in profile.get("projects", []):
         if not isinstance(project, Mapping):
             continue
         name = str(project.get("name", ""))
         for index, detail in enumerate(project.get("details", [])):
-            lookup[f"project-{name.casefold().replace(' ', '-')}-{index}"] = ("project", name, str(detail))
+            lookup[f"project-{name.casefold().replace(' ', '-')}-{index}"] = (
+                "project", name, str(detail)
+            )
     return lookup
 
 
@@ -63,7 +69,6 @@ def _selected_experience(profile: Mapping[str, object], tailored: TailoredResume
             if entry and entry[0] == "experience":
                 grouped.setdefault(entry[1], []).append(entry[2])
                 break
-    # Preserve source order while removing duplicate bullets.
     for company, bullets in list(grouped.items()):
         grouped[company] = list(dict.fromkeys(bullets))
     return grouped
@@ -205,3 +210,24 @@ def render_resume_pdf(html_content: str, output_path: Path) -> None:
         page.set_content(html_content, wait_until="load")
         page.pdf(path=str(output_path), format="A4", print_background=True, prefer_css_page_size=True)
         browser.close()
+
+
+def validate_resume_pdf(pdf_path: Path, candidate_name: str) -> dict[str, object]:
+    """Validate the machine-readable contract of a generated candidate resume."""
+    from pypdf import PdfReader
+
+    reader = PdfReader(str(pdf_path))
+    if len(reader.pages) != 1:
+        raise ValueError(f"resume must be exactly one page; found {len(reader.pages)}")
+    page = reader.pages[0]
+    width = float(page.mediabox.width)
+    height = float(page.mediabox.height)
+    if abs(width - _A4_WIDTH_POINTS) > _A4_TOLERANCE_POINTS or abs(height - _A4_HEIGHT_POINTS) > _A4_TOLERANCE_POINTS:
+        raise ValueError(f"resume page is not A4: {width:.2f} x {height:.2f} points")
+    text = page.extract_text() or ""
+    if candidate_name not in text:
+        raise ValueError("resume PDF does not contain the canonical candidate name")
+    lowered = text.casefold()
+    if any(marker in lowered for marker in _INTERNAL_MARKERS):
+        raise ValueError("internal Career OS branding leaked into rendered resume PDF")
+    return {"page_count": 1, "page_width_points": width, "page_height_points": height, "text_length": len(text)}
