@@ -28,14 +28,14 @@ jobs:
       - name: Check out exact triggering commit
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 1
           persist-credentials: false
 
       - name: Verify exact triggering commit
         shell: bash
         env:
-          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
           ACTUAL_SHA="$(git rev-parse HEAD)"
@@ -64,7 +64,7 @@ jobs:
         shell: bash
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID || '8374c380-f148-41ab-a77f-eb35de20f2db' }}
           CAREER_OS_MAX_JOBS: "10"
           CAREER_OS_NOTION_PAGE_SIZE: "25"
           PYTHONPATH: src
@@ -79,7 +79,7 @@ jobs:
         shell: bash
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID || '8374c380-f148-41ab-a77f-eb35de20f2db' }}
           CAREER_OS_MAX_JOBS: "10"
           PYTHONPATH: src
         run: |
@@ -114,7 +114,7 @@ jobs:
             echo '## Career OS autonomous cycle'
             echo
             echo "Trigger: ${{ github.event_name }}"
-            echo "Commit: ${{ github.sha }}"
+            echo "Commit: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}"
             echo "Notion worker outcome: ${{ steps.notion-worker.outcome }}"
             echo "Resume finalizer outcome: ${{ steps.resume-finalize.outcome }}"
             echo "Provider-free smoke outcome: ${{ steps.smoke.outcome }}"
