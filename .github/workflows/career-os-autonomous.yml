@@ -22,15 +22,28 @@ jobs:
   autonomous-cycle:
     if: >-
       github.event_name != 'workflow_run' ||
-      github.event.workflow_run.head_repository.full_name == github.repository
+      (
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        github.event.workflow_run.conclusion == 'success'
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Check out repository
+      - name: Check out exact triggering commit
         uses: actions/checkout@v5
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 1
           persist-credentials: false
+      - name: Verify exact triggering commit
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          set -euo pipefail
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          test "$ACTUAL_SHA" = "$EXPECTED_SHA"
+          echo "Verified exact commit: $ACTUAL_SHA"
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
@@ -69,7 +82,7 @@ jobs:
             {
               echo '## Career OS native cycle'
               echo
-              echo 'Provider-independent job ingestion, deterministic pipeline execution, and candidate-facing resume generation completed.'
+              echo 'Provider-independent job ingestion, deterministic pipeline execution, and candidate-facing resume generation completed on the exact CI-verified commit.'
               echo
               echo '```json'
               cat .career-os/native-smoke-result.json
