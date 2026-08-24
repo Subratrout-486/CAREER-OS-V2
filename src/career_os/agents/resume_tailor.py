@@ -11,8 +11,6 @@ _STOPWORDS = {
     "year", "using", "use", "ability", "strong", "good", "work", "working", "role",
 }
 
-# Keep tailoring deterministic and aligned with the canonical JD taxonomy.
-# These aliases change matching only; they never add a claim to the resume.
 _ALIASES = {
     "powerbi": "power bi",
     "power-bi": "power bi",
@@ -25,6 +23,10 @@ _ALIASES = {
     "google cloud platform": "gcp",
 }
 
+# Candidate-facing resumes are one-page artifacts. Keep the evidence ledger
+# complete, but select only the strongest evidence-backed bullets for output.
+_MAX_TAILORED_BULLETS = 18
+
 
 def _canonical_text(text: str) -> str:
     value = text.casefold()
@@ -34,12 +36,6 @@ def _canonical_text(text: str) -> str:
 
 
 def _terms(text: str) -> set[str]:
-    """Return canonical tokens plus canonical multi-word skills.
-
-    Multi-word canonical terms are retained separately so normalization such
-    as PowerBI -> Power BI does not lose the phrase merely because the token
-    `bi` is too short to survive the generic stop-word/length filter.
-    """
     canonical = _canonical_text(text)
     tokens = {
         token for token in re.findall(r"[a-z0-9+#.-]+", canonical)
@@ -55,13 +51,15 @@ def _terms(text: str) -> set[str]:
     return tokens | phrases
 
 
-class ResumeTailor:
-    """Creates a conservative JD-aligned resume draft from existing facts.
+def _experience_group(claim_id: str) -> str | None:
+    if not claim_id.startswith("exp-"):
+        return None
+    prefix, _, _ = claim_id.rpartition("-")
+    return prefix
 
-    Tailoring is intentionally evidence-preserving: it may reorder existing
-    bullets and expose matched keywords, but it never invents or rewrites a
-    claim that is not backed by the evidence ledger.
-    """
+
+class ResumeTailor:
+    """Create a conservative JD-aligned resume from existing candidate facts."""
 
     name = "resume_tailor"
 
@@ -77,47 +75,61 @@ class ResumeTailor:
         skill_terms = _terms(" ".join(jd.skills))
         jd_terms = hard_terms | preferred_terms | skill_terms
 
-        ranked: list[tuple[tuple[int, int, int, int], ResumeBullet]] = []
+        ranked: list[tuple[tuple[int, int, int, int, int], ResumeBullet]] = []
         for position, bullet in enumerate(resume.bullets):
             valid_ids = tuple(cid for cid in bullet.evidence_claim_ids if cid in supported_claims)
             if not valid_ids:
                 continue
-
             terms = _terms(bullet.text)
-            hard_overlap = len(terms.intersection(hard_terms))
-            preferred_overlap = len(terms.intersection(preferred_terms))
-            skill_overlap = len(terms.intersection(skill_terms))
-            total_overlap = len(terms.intersection(jd_terms))
-
-            # Treat requirement tiers lexicographically: an explicit must-have
-            # match always outranks a preferred/skill-only match. This avoids
-            # double-counting the same preferred skill when it also appears in
-            # the general skills list.
             relevance = (
-                hard_overlap,
-                preferred_overlap,
-                skill_overlap,
-                total_overlap,
+                len(terms.intersection(hard_terms)),
+                len(terms.intersection(preferred_terms)),
+                len(terms.intersection(skill_terms)),
+                len(terms.intersection(jd_terms)),
+                -position,
             )
-            ranked.append((relevance + (-position,), ResumeBullet(bullet.text, valid_ids)))
+            ranked.append((relevance, ResumeBullet(bullet.text, valid_ids)))
 
         ranked.sort(key=lambda item: item[0], reverse=True)
-        selected = tuple(bullet for _, bullet in ranked)
-        matched = tuple(sorted({term for bullet in selected for term in _terms(bullet.text).intersection(jd_terms)}))
-        used_ids = {cid for bullet in selected for cid in bullet.evidence_claim_ids}
-        omitted = tuple(sorted(set(supported_claims) - used_ids))
 
-        summary = resume.summary.strip()
-        edit_trace = ("Reordered evidence-backed bullets by JD relevance.",)
+        # Reserve one bullet for each professional experience group so a role
+        # is not silently erased when another role has stronger keyword overlap.
+        selected: list[ResumeBullet] = []
+        selected_ids: set[str] = set()
+        groups_seen: set[str] = set()
+        for _, bullet in ranked:
+            group = _experience_group(bullet.evidence_claim_ids[0]) if bullet.evidence_claim_ids else None
+            if group and group not in groups_seen and len(selected) < _MAX_TAILORED_BULLETS:
+                selected.append(bullet)
+                selected_ids.update(bullet.evidence_claim_ids)
+                groups_seen.add(group)
+
+        for _, bullet in ranked:
+            if len(selected) >= _MAX_TAILORED_BULLETS:
+                break
+            if any(cid in selected_ids for cid in bullet.evidence_claim_ids):
+                continue
+            selected.append(bullet)
+            selected_ids.update(bullet.evidence_claim_ids)
+
+        selected_tuple = tuple(selected)
+        matched = tuple(sorted({term for bullet in selected_tuple for term in _terms(bullet.text).intersection(jd_terms)}))
+        omitted = tuple(sorted(set(supported_claims) - selected_ids))
+
+        trace = (
+            "Reordered evidence-backed bullets by JD relevance.",
+            f"Selected at most {_MAX_TAILORED_BULLETS} evidence-backed bullets for the candidate-facing one-page artifact.",
+            "Omitted claims remain traceable in omitted_claim_ids and are not deleted from the evidence ledger.",
+        )
         if matched:
-            edit_trace += ("Prioritized existing JD-aligned keywords without adding new claims.",)
+            trace += ("Prioritized existing JD-aligned keywords without adding new claims.",)
         if hard_terms:
-            edit_trace += ("Weighted explicit must-have requirements above preferred requirements and general skills.",)
+            trace += ("Weighted explicit must-have requirements above preferred requirements and general skills.",)
 
         return TailoredResume(
-            summary=summary,
-            bullets=selected,
+            summary=resume.summary.strip(),
+            bullets=selected_tuple,
             matched_keywords=matched,
             omitted_claim_ids=omitted,
-            edit_trace=edit_trace,
+            edit_trace=trace,
         )
