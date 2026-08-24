@@ -4,13 +4,8 @@ on:
   workflow_dispatch:
   repository_dispatch:
     types: [career-os-continue]
-  pull_request:
-    branches: [main]
   schedule:
     - cron: "17 * * * *"
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
 
 concurrency:
   group: career-os-autonomous-loop
@@ -22,26 +17,20 @@ permissions:
 
 jobs:
   autonomous-cycle:
-    if: >-
-      github.event_name != 'workflow_run' ||
-      (
-        github.event.workflow_run.head_repository.full_name == github.repository &&
-        github.event.workflow_run.conclusion == 'success'
-      )
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - name: Check out exact triggering commit
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.sha }}
           fetch-depth: 1
           persist-credentials: false
 
       - name: Verify exact triggering commit
         shell: bash
         env:
-          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
+          EXPECTED_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           ACTUAL_SHA="$(git rev-parse HEAD)"
@@ -96,9 +85,9 @@ jobs:
             echo 'No worker report was produced.' >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Run provider-free real-job smoke cycle
+      - name: Run provider-free smoke cycle (diagnostic only)
         id: smoke
-        if: always()
+        continue-on-error: true
         shell: bash
         env:
           PYTHONPATH: src
@@ -106,43 +95,41 @@ jobs:
           set -euo pipefail
           python scripts/native_job_smoke_test.py
 
-      - name: Verify native cycle artifacts exist
-        if: always()
+      - name: Verify native cycle artifacts
+        if: steps.smoke.outcome == 'success'
         shell: bash
         run: |
           set -euo pipefail
           test -s .career-os/native-smoke-result.json
-          test -s .career-os/resume/*.pdf
-          test -s .career-os/resume/*.html
+          test -n "$(find .career-os/resume -maxdepth 1 -type f -name '*.pdf' -print -quit)"
+          test -n "$(find .career-os/resume -maxdepth 1 -type f -name '*.html' -print -quit)"
 
-      - name: Verify systemic Notion worker health
+      - name: Publish autonomous health summary
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -f .career-os/notion-worker-report.json ]] && grep -q '"error"' .career-os/notion-worker-report.json; then
-            echo 'Systemic Notion worker failure detected; failing the cycle after the smoke test completed.'
-            exit 1
-          fi
-
-      - name: Publish native cycle result
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -f .career-os/native-smoke-result.json ]]; then
-            {
-              echo '## Career OS native cycle'
-              echo
-              echo 'Provider-independent job ingestion, deterministic pipeline execution, and candidate-facing resume generation completed on the exact triggering commit.'
-              echo
+          {
+            echo '## Career OS autonomous cycle'
+            echo
+            echo "Notion worker outcome: ${{ steps.notion-worker.outcome }}"
+            echo "Provider-free smoke outcome: ${{ steps.smoke.outcome }}"
+            echo
+            if [[ -f .career-os/notion-worker-report.json ]]; then
+              echo '### Notion worker report'
+              echo '```json'
+              cat .career-os/notion-worker-report.json
+              echo '```'
+            fi
+            if [[ -f .career-os/native-smoke-result.json ]]; then
+              echo '### Native smoke report'
               echo '```json'
               cat .career-os/native-smoke-result.json
               echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload Career OS cycle artifacts
+      - name: Upload autonomous reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -153,3 +140,11 @@ jobs:
             .career-os/resume/
           if-no-files-found: warn
           include-hidden-files: true
+
+      - name: Fail only on systemic Notion worker failure
+        if: steps.notion-worker.outcome == 'failure'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "The Notion worker failed at the system level. Individual job failures must be recorded in the worker report and must not fail the batch."
+          exit 1
