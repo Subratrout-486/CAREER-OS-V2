@@ -10,13 +10,16 @@ from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
-from pypdf import PdfReader
-
 from career_os.candidate_profile import load_candidate_source_of_truth
 from career_os.models.evidence import EvidenceClaim, EvidenceKind, EvidenceSource, SupportStatus
 from career_os.models.resume import ResumeBullet, ResumeProfile
 from career_os.pipeline import CareerPipeline
-from career_os.resume_artifact import render_resume_html, render_resume_pdf, resume_filename
+from career_os.resume_artifact import (
+    render_resume_html,
+    render_resume_pdf,
+    resume_filename,
+    validate_resume_pdf,
+)
 
 
 class _HTMLText(HTMLParser):
@@ -195,14 +198,7 @@ def main() -> int:
     html_path.write_text(resume_html, encoding="utf-8")
     render_resume_pdf(resume_html, pdf_path)
 
-    reader = PdfReader(str(pdf_path))
-    if len(reader.pages) != 1:
-        raise RuntimeError(f"Tailored resume must be one page; rendered {len(reader.pages)} pages")
-    extracted_text = "\n".join(page.extract_text() or "" for page in reader.pages)
-    if str(candidate["name"]) not in extracted_text:
-        raise RuntimeError("Rendered resume PDF does not contain the canonical candidate name")
-    if any(marker in extracted_text.casefold() for marker in ("career os v2", "career-os-v2")):
-        raise RuntimeError("Internal Career OS branding leaked into rendered resume PDF")
+    resume_validation = validate_resume_pdf(pdf_path, str(candidate["name"]))
 
     output = {
         "run_id": run_id,
@@ -219,7 +215,7 @@ def main() -> int:
         "resume_filename": resume_name,
         "resume_pdf": str(pdf_path),
         "resume_html": str(html_path),
-        "resume_page_count": len(reader.pages),
+        "resume_validation": resume_validation,
     }
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
