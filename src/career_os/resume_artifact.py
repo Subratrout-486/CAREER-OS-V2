@@ -11,6 +11,7 @@ _INTERNAL_MARKERS = ("career os v2", "career-os-v2", "career_os_v2")
 _A4_WIDTH_POINTS = 595.28
 _A4_HEIGHT_POINTS = 841.89
 _A4_TOLERANCE_POINTS = 2.0
+_SINGLE_PAGE_SCALES = (1.0, 0.95, 0.90, 0.85, 0.80, 0.78)
 
 
 def _slug(value: str) -> str:
@@ -134,14 +135,33 @@ def render_resume_html(profile: Mapping[str, object], tailored: TailoredResume, 
 
 
 def render_resume_pdf(html_content: str, output_path: Path) -> None:
+    """Render an A4 PDF, adaptively scaling only when needed to keep it one page."""
+    from pypdf import PdfReader
     from playwright.sync_api import sync_playwright
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         page = browser.new_page()
         page.set_content(html_content, wait_until="load")
-        page.pdf(path=str(output_path), format="A4", print_background=True, prefer_css_page_size=True)
-        browser.close()
+        try:
+            for scale in _SINGLE_PAGE_SCALES:
+                page.pdf(
+                    path=str(output_path),
+                    format="A4",
+                    print_background=True,
+                    prefer_css_page_size=True,
+                    scale=scale,
+                )
+                page_count = len(PdfReader(str(output_path)).pages)
+                if page_count == 1:
+                    return
+            raise ValueError(
+                "resume content exceeds one A4 page even after adaptive scaling "
+                f"through scale {_SINGLE_PAGE_SCALES[-1]:.2f}"
+            )
+        finally:
+            browser.close()
 
 
 def validate_resume_pdf(pdf_path: Path, candidate_name: str) -> dict[str, object]:
