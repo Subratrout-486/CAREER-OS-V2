@@ -67,23 +67,19 @@ jobs:
           set -euo pipefail
           python scripts/notion_job_worker.py
 
-      - name: Publish Notion worker report
-        if: always()
+      - name: Finalize verified candidate resumes
+        id: resume-finalize
+        if: always() && steps.notion-worker.outcome != 'failure'
+        continue-on-error: true
         shell: bash
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID }}
+          CAREER_OS_MAX_JOBS: "10"
+          PYTHONPATH: src
         run: |
           set -euo pipefail
-          if [[ -f .career-os/notion-worker-report.json ]]; then
-            {
-              echo '## Career OS Notion worker'
-              echo
-              echo '```json'
-              cat .career-os/notion-worker-report.json
-              echo '```'
-            } >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo '## Career OS Notion worker' >> "$GITHUB_STEP_SUMMARY"
-            echo 'No worker report was produced.' >> "$GITHUB_STEP_SUMMARY"
-          fi
+          python scripts/notion_resume_finalize.py
 
       - name: Run provider-free smoke cycle (diagnostic only)
         id: smoke
@@ -113,20 +109,17 @@ jobs:
             echo '## Career OS autonomous cycle'
             echo
             echo "Notion worker outcome: ${{ steps.notion-worker.outcome }}"
+            echo "Resume finalizer outcome: ${{ steps.resume-finalize.outcome }}"
             echo "Provider-free smoke outcome: ${{ steps.smoke.outcome }}"
             echo
-            if [[ -f .career-os/notion-worker-report.json ]]; then
-              echo '### Notion worker report'
-              echo '```json'
-              cat .career-os/notion-worker-report.json
-              echo '```'
-            fi
-            if [[ -f .career-os/native-smoke-result.json ]]; then
-              echo '### Native smoke report'
-              echo '```json'
-              cat .career-os/native-smoke-result.json
-              echo '```'
-            fi
+            for report in .career-os/notion-worker-report.json .career-os/resume-finalize-report.json .career-os/native-smoke-result.json; do
+              if [[ -f "$report" ]]; then
+                echo "### $(basename "$report")"
+                echo '```json'
+                cat "$report"
+                echo '```'
+              fi
+            done
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload autonomous reports
@@ -137,11 +130,12 @@ jobs:
           path: |
             .career-os/native-smoke-result.json
             .career-os/notion-worker-report.json
+            .career-os/resume-finalize-report.json
             .career-os/resume/
           if-no-files-found: warn
           include-hidden-files: true
 
-      - name: Fail only on systemic Notion worker failure
+      - name: Fail only on systemic Notion intake failure
         if: steps.notion-worker.outcome == 'failure'
         shell: bash
         run: |
