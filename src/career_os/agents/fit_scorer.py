@@ -21,12 +21,19 @@ _TECHNICAL_ALIASES = {
     "salesforce": ("salesforce",), "jira": ("jira",), "rest api": ("rest api", "rest apis", "restful api", "restful apis"),
 }
 
+# Require degree context for "master" so domain terms such as "Master Data Management"
+# are not mistaken for education requirements.
 _EDUCATION_PATTERNS = (
-    r"\b(?:bachelor|bachelors|master|masters|phd|doctorate|degree|b\.?tech|b\.?e\.?|m\.?tech|m\.?e\.?|b\.?sc|b\.?com|m\.?sc|m\.?com|mba|computer science|engineering degree)\b",
+    r"\b(?:bachelor(?:'s|s)?|phd|doctorate|b\.?tech|b\.?e\.?|m\.?tech|m\.?e\.?|b\.?sc|b\.?com|m\.?sc|m\.?com|mba)\b",
+    r"\bmaster(?:'s|s)?\s+(?:degree|of|in)\b",
+    r"\b(?:associate|undergraduate|graduate)\s+degree\b",
+    r"\bengineering\s+degree\b",
+    r"\bcomputer\s+science\s+degree\b",
 )
 
 
 def _canonical_text(text: str) -> str:
+    """Normalize aliases and casing before requirement matching."""
     value = text.casefold()
     for alias, canonical in sorted(_ALIASES.items(), key=lambda item: len(item[0]), reverse=True):
         value = re.sub(rf"(?<![a-z0-9]){re.escape(alias)}(?![a-z0-9])", canonical, value)
@@ -34,15 +41,18 @@ def _canonical_text(text: str) -> str:
 
 
 def _terms(text: str) -> set[str]:
+    """Return normalized, non-stopword terms for conservative overlap matching."""
     return {token for token in re.findall(r"[a-z0-9+#.-]+", _canonical_text(text)) if len(token) > 2 and token not in _STOPWORDS}
 
 
 def _is_education_requirement(requirement: str) -> bool:
+    """Identify education requirements without confusing domain terms with degrees."""
     low = _canonical_text(requirement)
     return any(re.search(pattern, low) for pattern in _EDUCATION_PATTERNS)
 
 
 def _focused_terms(requirement: str) -> set[str]:
+    """Extract semantic matching keys for objective requirements."""
     low = _canonical_text(requirement)
     focused: set[str] = set()
     for canonical, aliases in _TECHNICAL_ALIASES.items():
@@ -58,6 +68,7 @@ def _focused_terms(requirement: str) -> set[str]:
 
 
 def _claim_supports_focus(claim: EvidenceClaim, focus: str) -> bool:
+    """Check whether an evidence claim explicitly supports a focused requirement."""
     text = _canonical_text(claim.claim)
     if focus == "bachelor":
         return bool(re.search(r"\bbachelor(?:'s)?\b", text))
@@ -68,6 +79,7 @@ def _claim_supports_focus(claim: EvidenceClaim, focus: str) -> bool:
 
 
 def _evidence_match(requirement: str, claims: tuple[EvidenceClaim, ...]) -> RequirementEvaluation:
+    """Match one requirement against supported evidence and return traceable results."""
     required = _focused_terms(requirement)
     if not required:
         return RequirementEvaluation(requirement, RequirementStatus.MISSING)
@@ -109,6 +121,7 @@ class FitScorer:
     name = "fit_scorer"
 
     def score(self, jd: JDAnalysis, ledger: EvidenceLedger) -> FitScore:
+        """Score hard, preferred, and skill requirements while isolating education risk."""
         claims = ledger.claims
         hard_all = tuple(_evidence_match(req, claims) for req in jd.must_have_requirements)
         preferred_all = tuple(_evidence_match(req, claims) for req in jd.preferred_requirements)
@@ -119,6 +132,7 @@ class FitScorer:
         preferred = tuple(e for e in preferred_all if not _is_education_requirement(e.requirement))
 
         def component(evaluations: tuple[RequirementEvaluation, ...]) -> float:
+            """Calculate a normalized component score from requirement evaluations."""
             if not evaluations:
                 return 100.0
             values = {RequirementStatus.MATCHED: 1.0, RequirementStatus.PARTIALLY_MATCHED: 0.5, RequirementStatus.MISSING: 0.0}
