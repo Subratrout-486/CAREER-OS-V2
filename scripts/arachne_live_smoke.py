@@ -8,7 +8,6 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from career_os.arachne_server import app
 from career_os.automation.job_processor import AutomaticJobProcessor
 from career_os.integrations.ats import GreenhouseAdapter
 
@@ -31,7 +30,6 @@ def main() -> None:
     }
 
     with tempfile.TemporaryDirectory() as tmp:
-        # Keep the smoke test isolated from persistent developer state.
         processor = AutomaticJobProcessor(
             candidate_path=Path("candidate/source_of_truth.json"),
             checkpoint_root=Path(tmp) / "checkpoints",
