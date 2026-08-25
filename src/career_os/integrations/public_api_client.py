@@ -19,15 +19,9 @@ class PublicAPIClient:
 
     RETRYABLE_HTTP = frozenset({408, 425, 429, 500, 502, 503, 504})
 
-    def __init__(
-        self,
-        *,
-        timeout: float = 15.0,
-        retries: int = 2,
-        backoff_seconds: float = 0.5,
-        opener: Callable[..., Any] | None = None,
-        sleeper: Callable[[float], None] = sleep,
-    ) -> None:
+    def __init__(self, *, timeout: float = 15.0, retries: int = 2,
+                 backoff_seconds: float = 0.5, opener: Callable[..., Any] | None = None,
+                 sleeper: Callable[[float], None] = sleep) -> None:
         if timeout <= 0 or retries < 0 or backoff_seconds < 0:
             raise ValueError("invalid HTTP client settings")
         self.timeout = timeout
@@ -37,29 +31,27 @@ class PublicAPIClient:
         self.sleeper = sleeper
 
     def get_json(self, url: str, *, headers: dict[str, str] | None = None) -> JsonValue:
-        request = Request(
-            url,
-            headers={
-                "Accept": "application/json",
-                "User-Agent": "Career-OS-V2/0.1",
-                **(headers or {}),
-            },
-        )
+        request = Request(url, headers={"Accept": "application/json", "User-Agent": "Career-OS-V2/0.1", **(headers or {})})
         last_error: Exception | None = None
         for attempt in range(self.retries + 1):
             try:
                 with self.opener(request, timeout=self.timeout) as response:
                     status = getattr(response, "status", 200)
                     if not 200 <= status < 300:
-                        raise PublicAPIError(f"HTTP {status}")
-                    return json.loads(response.read().decode("utf-8"))
+                        if status not in self.RETRYABLE_HTTP:
+                            raise PublicAPIError(f"HTTP {status}")
+                        last_error = PublicAPIError(f"HTTP {status}")
+                        retry_after = response.headers.get("Retry-After") if getattr(response, "headers", None) else None
+                        delay = self._delay(attempt, retry_after)
+                    else:
+                        return json.loads(response.read().decode("utf-8"))
             except HTTPError as exc:
-                last_error = exc
                 if exc.code not in self.RETRYABLE_HTTP:
                     raise PublicAPIError(f"HTTP {exc.code}") from exc
+                last_error = exc
                 retry_after = exc.headers.get("Retry-After") if exc.headers else None
                 delay = self._delay(attempt, retry_after)
-            except (URLError, TimeoutError, json.JSONDecodeError, PublicAPIError) as exc:
+            except (URLError, TimeoutError, json.JSONDecodeError) as exc:
                 last_error = exc
                 delay = self._delay(attempt, None)
             if attempt < self.retries:
