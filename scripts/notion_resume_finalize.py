@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import uuid
 from pathlib import Path
@@ -146,7 +147,19 @@ def finalize(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
     if not description.strip():
         return False, f"missing JD: {title}"
 
-    run_id = "notion-" + "-".join(x for x in [company, title] if x).casefold().replace(" ", "-")[:90] + "-" + page_id.replace("-", "")[:8]
+    if "career os" in title.casefold() or "e2e automation test" in title.casefold():
+        update_page(page_id, {
+            "Processing Stage": "Blocked",
+            "Status": "Rejected",
+            "Resume Status": "Failed",
+            "Fit Decision": "Do Not Apply",
+            "Blockers": "Internal Career OS/test job detected; candidate-facing resume generation is not permitted.",
+            "Assigned Agent": "Career OS Native Worker",
+        })
+        return False, f"blocked internal test job: {title}"
+
+    safe_job_key = re.sub(r"[^a-z0-9]+", "-", f"{company}-{title}".casefold()).strip("-")[:90]
+    run_id = f"notion-{safe_job_key}-{page_id.replace('-', '')[:8]}"
     checkpoint = ROOT / ".career-os" / "runs" / f"{run_id}.json"
     result = load_completed_result(checkpoint)
 
