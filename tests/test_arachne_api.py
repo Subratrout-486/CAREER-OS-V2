@@ -3,11 +3,13 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 import career_os.arachne_api as arachne_api
+from career_os.arachne_store import ArachneResultStore
 
 
 def app_for_test(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("CAREER_OS_CONDUCTOR_TOKEN", "test-token")
-    monkeypatch.setattr(arachne_api, "ArachneResultStore", lambda: arachne_api.ArachneResultStore(tmp_path / "arachne"))
+    store = ArachneResultStore(tmp_path / "arachne")
+    monkeypatch.setattr(arachne_api, "ArachneResultStore", lambda: store)
     from fastapi import FastAPI
     app = FastAPI()
     app.include_router(arachne_api.create_arachne_router())
