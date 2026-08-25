@@ -74,7 +74,7 @@ jobs:
           print(f"completed stages: {result.checkpoint.completed_stages!r}")
           print(f"tailored summary present: {bool(result.tailored_resume.summary)}")
           print(f"tailored bullets: {len(result.tailored_resume.bullets)}")
-          print(f"fit score: {result.fit.score}")
+          print(f"fit overall: {result.fit.overall}")
           print(f"hard gaps: {result.fit.hard_gaps!r}")
           print(f"ATS findings: {len(result.ats_audit.findings)}")
           print(f"application ready: {result.application_ready}")
@@ -85,5 +85,8 @@ jobs:
           assert result.tailored_resume.bullets
           assert actual_url == expected_url
           assert result.job.canonical_key == expected_key
+          assert result.fit.overall >= 0.0
+          assert result.fit.overall <= 100.0
+          assert result.ats_audit is not None
           print(f"LIVE SMOKE OK: {job.company} / {job.title}")
           PY
