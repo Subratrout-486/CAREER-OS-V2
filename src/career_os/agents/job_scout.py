@@ -15,9 +15,13 @@ _ATS_HOSTS = {
     "myworkdayjobs.com": SourceType.ATS,
 }
 
+_JOB_BOARD_SOURCES = {"adzuna", "arbeitnow"}
+
 
 def infer_source_type(source: str, url: str) -> SourceType:
     source_lower = source.casefold()
+    if source_lower in _JOB_BOARD_SOURCES:
+        return SourceType.JOB_BOARD
     if "official" in source_lower or "career" in source_lower:
         return SourceType.OFFICIAL_CAREER_PAGE
     host = url.casefold().split("/", 3)[2] if "://" in url else ""
@@ -54,30 +58,20 @@ class JobScout:
 
     name = "job_scout"
 
-    def build_record(
-        self,
-        *,
-        company: str,
-        title: str,
-        location: str | None,
-        source_url: str,
-        source: str,
-        description: str | None = None,
-    ) -> JobRecord:
+    def build_record(self, *, company: str, title: str, location: str | None,
+                     source_url: str, source: str, description: str | None = None) -> JobRecord:
         source_type = infer_source_type(source, source_url)
         record = JobRecord(
-            company=company.strip(),
-            title=title.strip(),
-            location=location.strip() if location else None,
-            source_url=source_url,
-            source=source.strip(),
-            source_type=source_type,
+            company=company.strip(), title=title.strip(), location=location.strip() if location else None,
+            source_url=source_url, source=source.strip(), source_type=source_type,
             canonical_key=canonical_job_key(company, title, location, source_url),
             content_fingerprint=content_fingerprint(company, title, location, description),
             description=description,
         )
         if source_type is SourceType.SEARCH_RESULT:
             record.risk_signals.append("SEARCH_RESULT_NEEDS_ORIGIN_VERIFICATION")
+        if source_type is SourceType.JOB_BOARD:
+            record.risk_signals.append("JOB_BOARD_NEEDS_ORIGIN_VERIFICATION")
         return record
 
     def deduplicate(self, jobs: Iterable[JobRecord]) -> list[JobRecord]:
