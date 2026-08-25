@@ -27,12 +27,7 @@ class SourceType(StrEnum):
 
 
 def canonicalize_url(url: str) -> str:
-    """Return one deterministic URL representation for job identity.
-
-    Tracking parameters and the fragment are removed. Non-root paths are
-    normalized to a trailing slash so equivalent source URLs produce the same
-    canonical representation across ATSes and job boards.
-    """
+    """Return one deterministic URL representation for job identity."""
     parts = urlsplit(url.strip())
     scheme = parts.scheme.lower()
     host = (parts.hostname or "").lower()
@@ -43,9 +38,8 @@ def canonicalize_url(url: str) -> str:
     if path != "/":
         path += "/"
     ignored = {"fbclid", "gclid", "ref", "source", "src"}
-    query = urlencode(
-        sorted((k, v) for k, v in parse_qsl(parts.query) if not k.lower().startswith("utm_") and k.lower() not in ignored)
-    )
+    query = urlencode(sorted((k, v) for k, v in parse_qsl(parts.query)
+                             if not k.lower().startswith("utm_") and k.lower() not in ignored))
     return urlunsplit((scheme, host, path, query, ""))
 
 
@@ -54,16 +48,14 @@ def _normalize_text(value: str | None) -> str:
 
 
 def canonical_job_key(company: str, title: str, location: str | None, url: str) -> str:
-    normalized = "|".join(
-        (_normalize_text(company), _normalize_text(title), _normalize_text(location), canonicalize_url(url))
-    )
+    normalized = "|".join((_normalize_text(company), _normalize_text(title),
+                           _normalize_text(location), canonicalize_url(url)))
     return sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def content_fingerprint(company: str, title: str, location: str | None, description: str | None) -> str:
-    normalized = "|".join(
-        (_normalize_text(company), _normalize_text(title), _normalize_text(location), _normalize_text(description))
-    )
+    normalized = "|".join((_normalize_text(company), _normalize_text(title),
+                           _normalize_text(location), _normalize_text(description)))
     return sha256(normalized.encode("utf-8")).hexdigest()
 
 
@@ -84,9 +76,19 @@ class JobRecord(BaseModel):
     source_type: SourceType = SourceType.UNKNOWN
     canonical_key: str
     content_fingerprint: str | None = None
+    external_id: str | None = None
     status: JobStatus = JobStatus.NEW
     description: str | None = None
     posted_at: datetime | None = None
+    remote: bool | None = None
+    salary_min: float | None = None
+    salary_max: float | None = None
+    salary_currency: str | None = None
+    salary_is_predicted: bool | None = None
+    employment_type: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    normalized_title: str | None = None
+    normalized_skills: list[str] = Field(default_factory=list)
     verification_evidence: list[JobEvidence] = Field(default_factory=list)
     duplicate_of: UUID | None = None
     risk_signals: list[str] = Field(default_factory=list)
