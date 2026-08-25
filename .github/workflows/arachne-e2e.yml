@@ -9,7 +9,7 @@ on:
 jobs:
   api-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -17,7 +17,11 @@ jobs:
           python-version: "3.11"
       - name: Install package
         run: python -m pip install -e ".[dev]"
-      - name: Run direct API tests
+      - name: Run direct API contract tests
         env:
           CAREER_OS_CONDUCTOR_TOKEN: test-token
         run: python -m pytest -q tests/test_arachne_api.py
+      - name: Run real live-job Arachne HTTP smoke test
+        env:
+          CAREER_OS_CONDUCTOR_TOKEN: arachne-live-smoke-token
+        run: python scripts/arachne_live_smoke.py
