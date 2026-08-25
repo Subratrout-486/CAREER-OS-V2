@@ -1,0 +1,23 @@
+name: Arachne E2E
+
+on:
+  push:
+    branches:
+      - feat/arachne-direct-api
+  workflow_dispatch:
+
+jobs:
+  api-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package
+        run: python -m pip install -e ".[dev]"
+      - name: Run direct API tests
+        env:
+          CAREER_OS_CONDUCTOR_TOKEN: test-token
+        run: python -m pytest -q tests/test_arachne_api.py
