@@ -145,6 +145,15 @@ class JDIntelligence:
         if not compensation_match:
             ambiguities.append("Compensation not explicitly stated")
 
+        if must or preferred:
+            analysis_quality = "strong"
+        elif responsibilities and skills:
+            analysis_quality = "moderate"
+        elif responsibilities or skills:
+            analysis_quality = "weak"
+        else:
+            analysis_quality = "insufficient"
+
         return JDAnalysis(
             source_text=source,
             responsibilities=responsibilities,
@@ -159,4 +168,5 @@ class JDIntelligence:
             explicit_signals=explicit,
             inferred_signals=inferred,
             ambiguities=ambiguities,
+            analysis_quality=analysis_quality,
         )

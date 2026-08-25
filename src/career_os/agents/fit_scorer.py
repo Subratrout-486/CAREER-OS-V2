@@ -170,13 +170,26 @@ def _evidence_match(requirement: str, claims: tuple[EvidenceClaim, ...]) -> Requ
     return RequirementEvaluation(requirement, status, tuple(claim.claim_id for claim, _ in candidates[:3]), min(1.0, coverage * best_claim.confidence))
 
 
+def _effective_jd_quality(jd: JDAnalysis) -> str:
+    """Infer quality for older/manual JDAnalysis instances without the new field."""
+    if jd.analysis_quality != "unknown":
+        return jd.analysis_quality
+    if jd.must_have_requirements or jd.preferred_requirements:
+        return "strong"
+    if jd.responsibilities and jd.skills:
+        return "moderate"
+    if jd.responsibilities or jd.skills:
+        return "weak"
+    return "insufficient"
+
+
 class FitScorer:
-    """Deterministically scores requirements; education is a visible risk, not a gate."""
+    """Deterministically scores requirements; weak JDs cannot produce falsely strong fits."""
 
     name = "fit_scorer"
 
     def score(self, jd: JDAnalysis, ledger: EvidenceLedger) -> FitScore:
-        """Score hard, preferred, and skill requirements while isolating education risk."""
+        """Score requirements while making weak or incomplete JD analysis explicit."""
         claims = ledger.claims
         hard_all = tuple(_evidence_match(req, claims) for req in jd.must_have_requirements)
         preferred_all = tuple(_evidence_match(req, claims) for req in jd.preferred_requirements)
@@ -196,14 +209,33 @@ class FitScorer:
         hard_score = component(hard)
         preferred_score = component(preferred)
         skill_score = component(skills)
-        overall = round(hard_score * 0.60 + preferred_score * 0.20 + skill_score * 0.20, 2)
+        base_overall = round(hard_score * 0.60 + preferred_score * 0.20 + skill_score * 0.20, 2)
+        jd_quality = _effective_jd_quality(jd)
+
+        # A missing/weak requirement structure is not evidence of candidate fit.
+        # Keep the component scores auditable, but cap the headline score so an
+        # under-specified posting can never become a false 100% match.
+        if jd_quality == "insufficient":
+            overall = 0.0
+        elif jd_quality == "weak":
+            overall = min(base_overall, 60.0)
+        elif jd_quality == "moderate":
+            overall = min(base_overall, 80.0)
+        else:
+            overall = base_overall
 
         hard_gaps = tuple(e.requirement for e in hard if e.status is not RequirementStatus.MATCHED)
         preferred_gaps = tuple(e.requirement for e in preferred if e.status is RequirementStatus.MISSING)
         education_gaps = tuple(e.requirement for e in education if e.status is not RequirementStatus.MATCHED)
         education_risk = "mismatch" if education_gaps else "matched" if education else "not_stated"
         evidence_ids = tuple(dict.fromkeys(claim_id for evaluation in (*hard_all, *preferred_all, *skills) for claim_id in evaluation.evidence_claim_ids))
-        recommendation = "hard_gap" if hard_gaps else ("strong_fit" if overall >= 80 else "moderate_fit" if overall >= 60 else "weak_fit")
+
+        if jd_quality == "insufficient":
+            recommendation = "insufficient_jd"
+        elif jd_quality == "weak" and not (hard_gaps or preferred_gaps):
+            recommendation = "insufficient_jd"
+        else:
+            recommendation = "hard_gap" if hard_gaps else ("strong_fit" if overall >= 80 else "moderate_fit" if overall >= 60 else "weak_fit")
 
         return FitScore(
             overall,
@@ -216,4 +248,5 @@ class FitScorer:
             recommendation,
             education_gaps,
             education_risk,
+            jd_quality,
         )

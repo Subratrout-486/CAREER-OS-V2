@@ -1,0 +1,107 @@
+name: Live Job Smoke
+
+on:
+  push:
+    branches:
+      - feat/job-discovery-ingestion
+  workflow_dispatch:
+
+jobs:
+  live-job-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package
+        run: python -m pip install -e ".[dev]"
+      - name: Process a real public Greenhouse job automatically
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import tempfile
+
+          from career_os.automation.job_processor import AutomaticJobProcessor, JobProcessingRequest
+          from career_os.integrations.ats import GreenhouseAdapter
+          from career_os.models.job import canonical_job_key, canonicalize_url
+
+          jobs = GreenhouseAdapter().fetch("stripe")
+          job = next((item for item in jobs if item.description and item.job_url), None)
+          if job is None:
+              raise SystemExit("No live Greenhouse job with description was returned")
+
+          raw = {
+              "company": job.company,
+              "title": job.title,
+              "location": job.location,
+              "url": job.job_url,
+              "source": job.provider,
+              "description": job.description,
+              "posted_at": job.posted_at,
+          }
+
+          with tempfile.TemporaryDirectory() as tmp:
+              result = AutomaticJobProcessor(
+                  candidate_path=Path("candidate/source_of_truth.json"),
+                  checkpoint_root=Path(tmp),
+              ).process(JobProcessingRequest(job=raw))
+
+          expected = [
+              "job_intake",
+              "jd_intelligence",
+              "evidence_analysis",
+              "fit_scoring",
+              "resume_tailoring",
+              "ats_audit",
+              "recruiter_review",
+              "application_readiness",
+          ]
+
+          source_url = str(result.job.source_url)
+          expected_url = canonicalize_url(str(job.job_url))
+          actual_url = canonicalize_url(source_url)
+          expected_key = canonical_job_key(job.company, job.title, job.location, str(job.job_url))
+
+          print(f"LIVE JOB: {job.company} / {job.title}")
+          print(f"source URL: {job.job_url!r}")
+          print(f"normalized URL: {source_url!r}")
+          print(f"expected canonical URL: {expected_url!r}")
+          print(f"actual canonical URL: {actual_url!r}")
+          print(f"expected canonical key: {expected_key!r}")
+          print(f"actual canonical key: {result.job.canonical_key!r}")
+          print(f"completed stages: {result.checkpoint.completed_stages!r}")
+          print(f"JD quality: {result.jd.analysis_quality!r}")
+          print(f"JD hard requirements: {len(result.jd.must_have_requirements)}")
+          print(f"JD preferred requirements: {len(result.jd.preferred_requirements)}")
+          print(f"JD skills: {result.jd.skills!r}")
+          print(f"tailored summary present: {bool(result.tailored_resume.summary)}")
+          print(f"tailored bullets: {len(result.tailored_resume.bullets)}")
+          print(f"fit overall: {result.fit.overall}")
+          print(f"fit JD quality: {result.fit.jd_quality!r}")
+          print(f"fit recommendation: {result.fit.recommendation!r}")
+          print(f"hard gaps: {result.fit.hard_gaps!r}")
+          print(f"ATS findings: {len(result.ats_audit.findings)}")
+          print(f"application ready: {result.application_ready}")
+
+          assert result.checkpoint.status == "completed"
+          assert result.checkpoint.completed_stages == expected
+          assert result.tailored_resume.summary
+          assert result.tailored_resume.bullets
+          assert actual_url == expected_url
+          assert result.job.canonical_key == expected_key
+          assert result.fit.overall >= 0.0
+          assert result.fit.overall <= 100.0
+          assert result.fit.jd_quality == result.jd.analysis_quality
+          assert result.ats_audit is not None
+
+          # A live posting without objective requirement sections must never be
+          # treated as a strong fit merely because incidental skills matched.
+          if not result.jd.must_have_requirements and not result.jd.preferred_requirements:
+              assert result.fit.jd_quality in {"weak", "insufficient"}
+              assert result.fit.overall <= 60.0
+              assert result.fit.recommendation == "insufficient_jd"
+
+          print(f"LIVE SMOKE OK: {job.company} / {job.title}")
+          PY

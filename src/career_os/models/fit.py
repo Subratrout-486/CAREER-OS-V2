@@ -30,6 +30,7 @@ class FitScore:
     recommendation: str = "weak_fit"
     education_gaps: tuple[str, ...] = field(default_factory=tuple)
     education_risk: str = "none"
+    jd_quality: str = "unknown"
 
     def __post_init__(self) -> None:
         """Validate that every fit component remains within the public score range."""
@@ -38,7 +39,7 @@ class FitScore:
                 raise ValueError("Fit scores must be between 0 and 100")
 
     def to_dict(self) -> dict[str, object]:
-        """Serialize the fit score, including auditable education risk fields."""
+        """Serialize the fit score, including auditable JD and education risk fields."""
         return {
             "overall": self.overall,
             "hard_requirements": self.hard_requirements,
@@ -50,4 +51,5 @@ class FitScore:
             "recommendation": self.recommendation,
             "education_gaps": list(self.education_gaps),
             "education_risk": self.education_risk,
+            "jd_quality": self.jd_quality,
         }

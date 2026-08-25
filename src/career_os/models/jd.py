@@ -20,6 +20,7 @@ class JDAnalysis:
     explicit_signals: list[str] = field(default_factory=list)
     inferred_signals: list[str] = field(default_factory=list)
     ambiguities: list[str] = field(default_factory=list)
+    analysis_quality: str = "unknown"
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -36,4 +37,5 @@ class JDAnalysis:
             "explicit_signals": self.explicit_signals,
             "inferred_signals": self.inferred_signals,
             "ambiguities": self.ambiguities,
+            "analysis_quality": self.analysis_quality,
         }
