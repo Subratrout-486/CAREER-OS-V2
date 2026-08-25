@@ -25,7 +25,7 @@ jobs:
 
           from career_os.automation.job_processor import AutomaticJobProcessor, JobProcessingRequest
           from career_os.integrations.ats import GreenhouseAdapter
-          from career_os.models.job import canonicalize_url
+          from career_os.models.job import canonical_job_key, canonicalize_url
 
           jobs = GreenhouseAdapter().fetch("stripe")
           job = next((item for item in jobs if item.description and item.job_url), None)
@@ -58,12 +58,32 @@ jobs:
               "recruiter_review",
               "application_readiness",
           ]
+
+          source_url = str(result.job.source_url)
+          expected_url = canonicalize_url(str(job.job_url))
+          actual_url = canonicalize_url(source_url)
+          expected_key = canonical_job_key(job.company, job.title, job.location, str(job.job_url))
+
+          print(f"LIVE JOB: {job.company} / {job.title}")
+          print(f"source URL: {job.job_url!r}")
+          print(f"normalized URL: {source_url!r}")
+          print(f"expected canonical URL: {expected_url!r}")
+          print(f"actual canonical URL: {actual_url!r}")
+          print(f"expected canonical key: {expected_key!r}")
+          print(f"actual canonical key: {result.job.canonical_key!r}")
+          print(f"completed stages: {result.checkpoint.completed_stages!r}")
+          print(f"tailored summary present: {bool(result.tailored_resume.summary)}")
+          print(f"tailored bullets: {len(result.tailored_resume.bullets)}")
+          print(f"fit score: {result.fit.score}")
+          print(f"hard gaps: {result.fit.hard_gaps!r}")
+          print(f"ATS findings: {len(result.ats_audit.findings)}")
+          print(f"application ready: {result.application_ready}")
+
           assert result.checkpoint.status == "completed"
           assert result.checkpoint.completed_stages == expected
           assert result.tailored_resume.summary
           assert result.tailored_resume.bullets
-          assert str(result.job.source_url) == canonicalize_url(job.job_url)
+          assert actual_url == expected_url
+          assert result.job.canonical_key == expected_key
           print(f"LIVE SMOKE OK: {job.company} / {job.title}")
-          print(f"tailored bullets: {len(result.tailored_resume.bullets)}")
-          print(f"application ready: {result.application_ready}")
           PY
