@@ -78,3 +78,5 @@ def create_arachne_router(
             guard.release(payload.idempotency_key)
             raise HTTPException(status_code=502, detail={"trace_id": trace_id, "error": "CareerOS processing failed"}) from exc
         return {"trace_id": trace_id, "processing": "automatic", "submission_enabled": False, "result": serialized}
+
+    return router
