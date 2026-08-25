@@ -72,6 +72,30 @@ jobs:
           set -euo pipefail
           python scripts/notion_job_worker_runtime.py
 
+      - name: Fetch and process public API jobs
+        id: public-job-api
+        continue-on-error: true
+        shell: bash
+        env:
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+          CAREER_OS_PUBLIC_JOB_QUERY: ${{ vars.CAREER_OS_PUBLIC_JOB_QUERY || '' }}
+          CAREER_OS_ADZUNA_QUERY: ${{ vars.CAREER_OS_ADZUNA_QUERY || '' }}
+          CAREER_OS_ADZUNA_COUNTRY: ${{ vars.CAREER_OS_ADZUNA_COUNTRY || 'in' }}
+          CAREER_OS_ADZUNA_LOCATION: ${{ vars.CAREER_OS_ADZUNA_LOCATION || '' }}
+          CAREER_OS_ARBEITNOW_QUERY: ${{ vars.CAREER_OS_ARBEITNOW_QUERY || '' }}
+          CAREER_OS_ARBEITNOW_LOCATION: ${{ vars.CAREER_OS_ARBEITNOW_LOCATION || '' }}
+          CAREER_OS_ARBEITNOW_REMOTE_ONLY: ${{ vars.CAREER_OS_ARBEITNOW_REMOTE_ONLY || 'false' }}
+          CAREER_OS_OPEN_SKILLS_ENABLED: ${{ vars.CAREER_OS_OPEN_SKILLS_ENABLED || 'false' }}
+          CAREER_OS_OPEN_SKILLS_BASE_URL: ${{ vars.CAREER_OS_OPEN_SKILLS_BASE_URL || 'http://api.dataatwork.org/v1' }}
+          CAREER_OS_OPEN_SKILLS_ALLOW_HTTP: ${{ vars.CAREER_OS_OPEN_SKILLS_ALLOW_HTTP || 'false' }}
+          CAREER_OS_PUBLIC_API_MAX_JOBS: "20"
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          python scripts/public_job_api_worker.py
+          test -s .career-os/public-job-api-report.json
+
       - name: Finalize verified candidate resumes
         id: resume-finalize
         if: always() && steps.notion-worker.outcome != 'failure'
@@ -116,10 +140,11 @@ jobs:
             echo "Trigger: ${{ github.event_name }}"
             echo "Commit: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}"
             echo "Notion worker outcome: ${{ steps.notion-worker.outcome }}"
+            echo "Public API worker outcome: ${{ steps.public-job-api.outcome }}"
             echo "Resume finalizer outcome: ${{ steps.resume-finalize.outcome }}"
             echo "Provider-free smoke outcome: ${{ steps.smoke.outcome }}"
             echo
-            for report in .career-os/notion-worker-report.json .career-os/resume-finalize-report.json .career-os/native-smoke-result.json; do
+            for report in .career-os/notion-worker-report.json .career-os/public-job-api-report.json .career-os/resume-finalize-report.json .career-os/native-smoke-result.json; do
               if [[ -f "$report" ]]; then
                 echo "### $(basename "$report")"
                 echo '```json'
@@ -137,6 +162,7 @@ jobs:
           path: |
             .career-os/native-smoke-result.json
             .career-os/notion-worker-report.json
+            .career-os/public-job-api-report.json
             .career-os/resume-finalize-report.json
             .career-os/resume/
           if-no-files-found: warn
