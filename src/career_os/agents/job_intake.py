@@ -61,9 +61,16 @@ class JobIntakePipeline:
         job.salary_currency = str(raw.get("salary_currency")) if raw.get("salary_currency") else None
         job.salary_is_predicted = _boolean(raw.get("salary_is_predicted"))
         job.employment_type = str(raw.get("employment_type")) if raw.get("employment_type") else None
+        job.normalized_title = str(raw.get("normalized_title")) if raw.get("normalized_title") else None
+        normalized_skills = raw.get("normalized_skills")
+        if isinstance(normalized_skills, (list, tuple, set)):
+            job.normalized_skills = [str(x).strip() for x in normalized_skills if str(x).strip()]
         tags = raw.get("tags")
         if isinstance(tags, (list, tuple, set)):
             job.tags = [str(tag).strip() for tag in tags if str(tag).strip()]
+        risk_signals = raw.get("risk_signals")
+        if isinstance(risk_signals, (list, tuple, set)):
+            job.risk_signals.extend(str(x) for x in risk_signals if str(x))
 
         posted = self._first(raw, "posted_at", "published_at", "publication_date", "created_at")
         if isinstance(posted, datetime):
