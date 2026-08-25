@@ -1,0 +1,68 @@
+name: Live Job Smoke
+
+on:
+  push:
+    branches:
+      - feat/job-discovery-ingestion
+  workflow_dispatch:
+
+jobs:
+  live-job-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install package
+        run: python -m pip install -e ".[dev]"
+      - name: Process a real public Greenhouse job automatically
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import tempfile
+
+          from career_os.automation.job_processor import AutomaticJobProcessor, JobProcessingRequest
+          from career_os.integrations.ats import GreenhouseAdapter
+
+          jobs = GreenhouseAdapter().fetch("stripe")
+          job = next((item for item in jobs if item.description and item.job_url), None)
+          if job is None:
+              raise SystemExit("No live Greenhouse job with description was returned")
+
+          raw = {
+              "company": job.company,
+              "title": job.title,
+              "location": job.location,
+              "url": job.job_url,
+              "source": job.provider,
+              "description": job.description,
+              "posted_at": job.posted_at,
+          }
+
+          with tempfile.TemporaryDirectory() as tmp:
+              result = AutomaticJobProcessor(
+                  candidate_path=Path("candidate/source_of_truth.json"),
+                  checkpoint_root=Path(tmp),
+              ).process(JobProcessingRequest(job=raw))
+
+          expected = [
+              "job_intake",
+              "jd_intelligence",
+              "evidence_analysis",
+              "fit_scoring",
+              "resume_tailoring",
+              "ats_audit",
+              "recruiter_review",
+              "application_readiness",
+          ]
+          assert result.checkpoint.status == "completed"
+          assert result.checkpoint.completed_stages == expected
+          assert result.tailored_resume.summary
+          assert result.tailored_resume.bullets
+          assert result.job.source_url == job.job_url
+          print(f"LIVE SMOKE OK: {job.company} / {job.title}")
+          print(f"tailored bullets: {len(result.tailored_resume.bullets)}")
+          print(f"application ready: {result.application_ready}")
+          PY
