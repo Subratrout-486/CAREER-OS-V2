@@ -25,3 +25,7 @@ jobs:
         run: python -m playwright install --with-deps chromium
       - name: Run tests
         run: python -m pytest -q
+      - name: Run live Greenhouse → Arachne smoke test
+        env:
+          CAREER_OS_CONDUCTOR_TOKEN: arachne-live-smoke-token
+        run: python scripts/arachne_live_smoke.py
