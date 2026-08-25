@@ -1,18 +1,25 @@
 from pathlib import Path
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import career_os.arachne_api as arachne_api
 from career_os.arachne_store import ArachneResultStore
+from career_os.conductor_bridge import IdempotencyStore
 
 
-def app_for_test(monkeypatch, tmp_path: Path):
+def app_for_test(monkeypatch, tmp_path: Path, processor_factory=None):
     monkeypatch.setenv("CAREER_OS_CONDUCTOR_TOKEN", "test-token")
     store = ArachneResultStore(tmp_path / "arachne")
-    monkeypatch.setattr(arachne_api, "ArachneResultStore", lambda: store)
-    from fastapi import FastAPI
+    guard = IdempotencyStore(str(tmp_path / "idempotency.json"))
     app = FastAPI()
-    app.include_router(arachne_api.create_arachne_router())
+    app.include_router(
+        arachne_api.create_arachne_router(
+            store=store,
+            idempotency_store=guard,
+            processor_factory=processor_factory,
+        )
+    )
     return TestClient(app)
 
 
@@ -39,9 +46,8 @@ def test_job_enters_automatic_processor(monkeypatch, tmp_path):
             calls.append(request.job)
             return FakeResult()
 
-    monkeypatch.setattr(arachne_api, "AutomaticJobProcessor", FakeProcessor)
     monkeypatch.setattr(arachne_api, "result_to_dict", lambda result: {"job": {"canonical_key": result.job.canonical_key}, "tailored_resume": {"summary": "ready"}})
-    client = app_for_test(monkeypatch, tmp_path)
+    client = app_for_test(monkeypatch, tmp_path, processor_factory=FakeProcessor)
     response = client.post("/api/v1/jobs", headers={"X-Career-OS-Token": "test-token"}, json={"idempotency_key": "arachne-test-001", "job": {"company": "Example", "title": "Support Engineer"}})
     assert response.status_code == 200
     assert response.json()["processing"] == "automatic"
@@ -61,9 +67,12 @@ def test_duplicate_idempotency_key_is_rejected(monkeypatch, tmp_path):
     class FakeResult:
         job = FakeJob()
 
-    monkeypatch.setattr(arachne_api, "AutomaticJobProcessor", lambda: type("P", (), {"process": lambda self, request: FakeResult()})())
+    class FakeProcessor:
+        def process(self, request):
+            return FakeResult()
+
     monkeypatch.setattr(arachne_api, "result_to_dict", lambda result: {"job": {"canonical_key": result.job.canonical_key}})
-    client = app_for_test(monkeypatch, tmp_path)
+    client = app_for_test(monkeypatch, tmp_path, processor_factory=FakeProcessor)
     payload = {"idempotency_key": "arachne-test-duplicate", "job": {"title": "Support Engineer"}}
     assert client.post("/api/v1/jobs", headers={"X-Career-OS-Token": "test-token"}, json=payload).status_code == 200
     assert client.post("/api/v1/jobs", headers={"X-Career-OS-Token": "test-token"}, json=payload).status_code == 409
