@@ -14,7 +14,7 @@ _ATS_HOSTS = {
     "jobs.smartrecruiters.com": SourceType.ATS,
     "myworkdayjobs.com": SourceType.ATS,
 }
-
+_ATS_SOURCES = {"greenhouse", "lever", "ashby", "workday", "rippling", "smartrecruiters", "teamtailor"}
 _JOB_BOARD_SOURCES = {"adzuna", "arbeitnow"}
 
 
@@ -22,6 +22,8 @@ def infer_source_type(source: str, url: str) -> SourceType:
     source_lower = source.casefold()
     if source_lower in _JOB_BOARD_SOURCES:
         return SourceType.JOB_BOARD
+    if source_lower in _ATS_SOURCES:
+        return SourceType.ATS
     if "official" in source_lower or "career" in source_lower:
         return SourceType.OFFICIAL_CAREER_PAGE
     host = url.casefold().split("/", 3)[2] if "://" in url else ""
