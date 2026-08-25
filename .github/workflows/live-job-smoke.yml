@@ -25,6 +25,7 @@ jobs:
 
           from career_os.automation.job_processor import AutomaticJobProcessor, JobProcessingRequest
           from career_os.integrations.ats import GreenhouseAdapter
+          from career_os.models.job import canonicalize_url
 
           jobs = GreenhouseAdapter().fetch("stripe")
           job = next((item for item in jobs if item.description and item.job_url), None)
@@ -61,7 +62,7 @@ jobs:
           assert result.checkpoint.completed_stages == expected
           assert result.tailored_resume.summary
           assert result.tailored_resume.bullets
-          assert result.job.source_url == job.job_url
+          assert str(result.job.source_url) == canonicalize_url(job.job_url)
           print(f"LIVE SMOKE OK: {job.company} / {job.title}")
           print(f"tailored bullets: {len(result.tailored_resume.bullets)}")
           print(f"application ready: {result.application_ready}")
