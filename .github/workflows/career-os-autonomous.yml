@@ -11,6 +11,10 @@ on:
   schedule:
     - cron: "17 3 * * *"
 
+permissions:
+  contents: read
+  actions: read
+
 concurrency:
   group: career-os-autonomous-loop
   cancel-in-progress: false
@@ -81,6 +85,14 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/autonomous_cycle.py
+
+      # provider-free smoke cycle (diagnostic only)
+      - name: Run provider-free smoke cycle (diagnostic only)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/native_job_smoke_test.py
 
       - name: Verify native cycle artifacts
         if: always()
