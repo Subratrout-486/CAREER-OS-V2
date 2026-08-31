@@ -178,6 +178,10 @@ def finalize(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
     hard_gaps = getattr(result.fit, "hard_gaps", None) or []
     blockers = "; ".join(str(x) for x in hard_gaps) if hard_gaps else "; ".join(str(getattr(x, "message", x)) for x in findings)[:1900]
     ready = bool(result.application_ready) and not findings
+    # Notion file uploads are exposed as page attachments rather than stable public URLs.
+    # Store the canonical job page URL in Resume URL so the dashboard always has a
+    # clickable reference to the page containing the verified tailored PDF attachment.
+    resume_reference = str(page.get("url") or f"https://www.notion.so/{page_id.replace('-', '')}")
     update_page(page_id, {
         "Processing Stage": "Ready to Apply" if ready else "Resume Finalized",
         "Status": "Ready to Apply" if ready else "Shortlisted",
@@ -188,6 +192,7 @@ def finalize(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
         "Blockers": blockers,
         "Assigned Agent": "Career OS Native Worker",
         "Evidence": f"Verified candidate PDF attached to Notion: {filename}; validation={validation}",
+        "Resume URL": resume_reference,
     })
     return ready, f"finalized: {title} -> {filename} -> {'READY_TO_APPLY' if ready else 'REVIEW'}"
 
