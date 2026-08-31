@@ -22,9 +22,14 @@ dependencies = [
 openai-agents = [
   "openai-agents>=0.2.0",
 ]
+automation = [
+  "playwright>=1.52",
+  "scrapling>=0.4.15,<0.5",
+]
 dev = [
   "pytest>=8.0",
   "playwright>=1.52",
+  "scrapling>=0.4.15,<0.5",
   "pypdf>=5.0",
   "httpx>=0.27,<1",
 ]
