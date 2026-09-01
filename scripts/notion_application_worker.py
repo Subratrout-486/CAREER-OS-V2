@@ -33,12 +33,17 @@ def _text(page: dict[str, Any], name: str) -> str:
 
 
 def _query(ds: str, query: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
+    """Query a Notion data source without sending invalid null filters.
+
+    Notion rejects ``filter: null``; omitting the optional filter is the
+    canonical unfiltered query. ``query`` and ``params`` are retained for the
+    worker's existing call contract.
+    """
+    body: dict[str, Any] = {"page_size": 100}
     response = notion_job_worker.notion_request(
-        "POST", f"/data_sources/{ds.replace('-', '')}/query", {"page_size": 100, "filter": None}
+        "POST", f"/data_sources/{ds.replace('-', '')}/query", body
     )
     rows = response.get("results", []) or []
-    if not params:
-        return rows
     return rows
 
 
@@ -149,7 +154,6 @@ def main() -> int:
 def _application_record_from_page(page: dict[str, Any]):
     """Construct the domain record using the manager's existing job model."""
     from career_os.agents.application_manager import ApplicationManager
-    from career_os.models.application import ApplicationRecord
     from career_os.models.job import JobRecord, SourceType, canonical_job_key
 
     url = _text(page, "Job URL") or _text(page, "Application URL")
