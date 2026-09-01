@@ -42,8 +42,8 @@ def test_jobpilot_executor_builds_campaign_and_dispatches_browser(monkeypatch):
 
     assert result.submitted is False
     assert result.state == "timeout"
-    assert any(kind == "terminal" and path == "/sessions/start" for kind, path, _ in calls)
-    assert any(kind == "terminal" and path == "/sessions/inject" for kind, path, _ in calls)
+    assert any(kind == "terminal" and path == "/sessions/start" for kind, _, path, _ in calls)
+    assert any(kind == "terminal" and path == "/sessions/inject" for kind, _, path, _ in calls)
     api_calls = [(method, path, body) for kind, method, path, body in calls if kind == "api"]
     assert any(path == "/api/campaigns" and body["source"] == "career-os" for _, path, body in api_calls)
 
