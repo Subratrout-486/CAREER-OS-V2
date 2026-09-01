@@ -1,0 +1,167 @@
+name: Career OS Autonomous Repair v2
+
+on:
+  workflow_run:
+    workflows:
+      - Career OS Autonomous Loop
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: career-os-autonomous-repair-v2-main
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Resolve failed run
+        id: context
+        env:
+          RUN_ID: ${{ github.event.workflow_run.id || '' }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout exact failed commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.context.outputs.head_sha }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Capture failure evidence
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ steps.context.outputs.run_id }}
+        run: |
+          mkdir -p .career-os
+          if [ -n "$RUN_ID" ]; then gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --log-failed 2>&1 || true; fi
+          if [ -n "$RUN_ID" ]; then gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --log-failed 2>&1 | tail -n 30000 > .career-os/repair-v2-context.log || true; fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m playwright install --with-deps chromium
+
+      - name: Reproduce the complete failing path
+        id: reproduce
+        continue-on-error: true
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID || '8374c380-f148-41ab-a77f-eb35de20f2db' }}
+          CAREER_OS_PUBLIC_JOB_QUERY: ${{ vars.CAREER_OS_PUBLIC_JOB_QUERY || 'support engineer,application support,production support,software support' }}
+          CAREER_OS_ADZUNA_QUERY: ${{ vars.CAREER_OS_ADZUNA_QUERY || '' }}
+          CAREER_OS_ADZUNA_COUNTRY: ${{ vars.CAREER_OS_ADZUNA_COUNTRY || 'in' }}
+          CAREER_OS_ADZUNA_LOCATION: ${{ vars.CAREER_OS_ADZUNA_LOCATION || 'India' }}
+          CAREER_OS_ARBEITNOW_QUERY: ${{ vars.CAREER_OS_ARBEITNOW_QUERY || 'support' }}
+          CAREER_OS_ARBEITNOW_LOCATION: ${{ vars.CAREER_OS_ARBEITNOW_LOCATION || '' }}
+          CAREER_OS_ARBEITNOW_REMOTE_ONLY: ${{ vars.CAREER_OS_ARBEITNOW_REMOTE_ONLY || 'false' }}
+          CAREER_OS_PUBLIC_API_MAX_JOBS: "10"
+          CAREER_OS_PUBLIC_API_MAX_AGE_DAYS: "2"
+          CAREER_OS_MAX_JOBS: "10"
+          CAREER_OS_NOTION_PAGE_SIZE: "25"
+          CAREER_OS_CYCLE_PASSES: "1"
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          python scripts/autonomous_cycle.py 2>&1 | tee .career-os/repair-v2-baseline.log
+          python scripts/native_job_smoke_test.py 2>&1 | tee -a .career-os/repair-v2-baseline.log
+
+      - name: Autonomous root-cause repair
+        id: codex
+        if: steps.reproduce.outcome == 'failure'
+        continue-on-error: true
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ":workspace"
+          safety-strategy: drop-sudo
+          output-file: .career-os/repair-v2-report.md
+          prompt: |
+            Act as the senior autonomous repair engineer for CAREER-OS-V2.
+            The checkout is the exact commit that produced the failure.
+
+            Evidence is in:
+            - .career-os/repair-v2-context.log
+            - .career-os/repair-v2-baseline.log
+            - the repository's current source, tests and workflow files
+
+            Find the root cause. In particular, reproduce the failing native smoke path and
+            inspect checkpoint/state semantics before changing code. Use the supplied proven
+            repository patterns where relevant: Auto-Company for persistent stateful loops and
+            bounded recovery, ODS for RCA/operational recovery, Scout for resilient discovery,
+            and the existing provider-neutral controller for orchestration.
+
+            Work directly in the checkout. Make the smallest correct source/test/workflow change.
+            Run focused tests and then the complete relevant verification path.
+            Never weaken/delete/skip tests, fabricate external data, alter secrets, or claim an
+            application was submitted. Do not commit or push; leave verified changes in the tree.
+
+            A fix is successful only when the original failing path passes for the right reason.
+            If an external service is genuinely unavailable, make that state explicit and resumable.
+
+      - name: Verify repair
+        id: verify
+        if: steps.reproduce.outcome == 'failure'
+        continue-on-error: true
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID || '8374c380-f148-41ab-a77f-eb35de20f2db' }}
+          CAREER_OS_PUBLIC_JOB_QUERY: ${{ vars.CAREER_OS_PUBLIC_JOB_QUERY || 'support engineer,application support,production support,software support' }}
+          CAREER_OS_ADZUNA_QUERY: ${{ vars.CAREER_OS_ADZUNA_QUERY || '' }}
+          CAREER_OS_ADZUNA_COUNTRY: ${{ vars.CAREER_OS_ADZUNA_COUNTRY || 'in' }}
+          CAREER_OS_ADZUNA_LOCATION: ${{ vars.CAREER_OS_ADZUNA_LOCATION || 'India' }}
+          CAREER_OS_ARBEITNOW_QUERY: ${{ vars.CAREER_OS_ARBEITNOW_QUERY || 'support' }}
+          CAREER_OS_ARBEITNOW_LOCATION: ${{ vars.CAREER_OS_ARBEITNOW_LOCATION || '' }}
+          CAREER_OS_ARBEITNOW_REMOTE_ONLY: ${{ vars.CAREER_OS_ARBEITNOW_REMOTE_ONLY || 'false' }}
+          CAREER_OS_PUBLIC_API_MAX_JOBS: "10"
+          CAREER_OS_PUBLIC_API_MAX_AGE_DAYS: "2"
+          CAREER_OS_MAX_JOBS: "10"
+          CAREER_OS_NOTION_PAGE_SIZE: "25"
+          CAREER_OS_CYCLE_PASSES: "1"
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          python -m pytest -q
+          python scripts/autonomous_cycle.py
+          python scripts/native_job_smoke_test.py
+          git diff --check
+
+      - name: Stop unless the repair is genuinely verified
+        if: steps.reproduce.outcome == 'failure' && steps.verify.outcome != 'success'
+        run: exit 1
+
+      - name: Commit verified repair
+        if: steps.reproduce.outcome == 'failure' && steps.verify.outcome == 'success'
+        run: |
+          git config user.name "career-os-autonomous-repair[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git reset -- .career-os/repair-v2-context.log .career-os/repair-v2-baseline.log .career-os/repair-v2-report.md 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No verified source change was produced."
+            exit 1
+          fi
+          git commit -m "fix: autonomous repair from native career os failure"
+          git push origin HEAD:main
+
+      - name: Re-enter CI after verified repair
+        if: steps.reproduce.outcome == 'failure' && steps.verify.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref main
