@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+authorizations:
+  contents: read
+
 concurrency:
   group: career-os-production-gate
   cancel-in-progress: false
@@ -15,7 +18,7 @@ concurrency:
 jobs:
   production-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out exact commit
         uses: actions/checkout@v5
@@ -40,28 +43,59 @@ jobs:
       - name: Run full test suite
         run: python -m pytest -q
 
-      - name: Run native end-to-end smoke test
-        run: python scripts/native_job_smoke_test.py
+      - name: Run live autonomous backend cycle
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID || '8374c380-f148-41ab-a77f-eb35de20f2db' }}
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+          CAREER_OS_PUBLIC_JOB_QUERY: ${{ vars.CAREER_OS_PUBLIC_JOB_QUERY || 'support engineer,application support,production support,software support' }}
+          CAREER_OS_ADZUNA_QUERY: ${{ vars.CAREER_OS_ADZUNA_QUERY || '' }}
+          CAREER_OS_ADZUNA_COUNTRY: ${{ vars.CAREER_OS_ADZUNA_COUNTRY || 'in' }}
+          CAREER_OS_ADZUNA_LOCATION: ${{ vars.CAREER_OS_ADZUNA_LOCATION || 'India' }}
+          CAREER_OS_ARBEITNOW_QUERY: ${{ vars.CAREER_OS_ARBEITNOW_QUERY || 'support' }}
+          CAREER_OS_ARBEITNOW_LOCATION: ${{ vars.CAREER_OS_ARBEITNOW_LOCATION || '' }}
+          CAREER_OS_ARBEITNOW_REMOTE_ONLY: ${{ vars.CAREER_OS_ARBEITNOW_REMOTE_ONLY || 'false' }}
+          CAREER_OS_OPEN_SKILLS_ENABLED: ${{ vars.CAREER_OS_OPEN_SKILLS_ENABLED || 'false' }}
+          CAREER_OS_OPEN_SKILLS_BASE_URL: ${{ vars.CAREER_OS_OPEN_SKILLS_BASE_URL || 'http://api.dataatwork.org/v1' }}
+          CAREER_OS_OPEN_SKILLS_ALLOW_HTTP: ${{ vars.CAREER_OS_OPEN_SKILLS_ALLOW_HTTP || 'false' }}
+          CAREER_OS_PUBLIC_API_MAX_JOBS: "20"
+          CAREER_OS_PUBLIC_API_MAX_AGE_DAYS: "2"
+          CAREER_OS_MAX_JOBS: "10"
+          CAREER_OS_NOTION_PAGE_SIZE: "25"
+          CAREER_OS_CYCLE_PASSES: "2"
+          PYTHONPATH: src
+        run: python scripts/autonomous_cycle.py
 
-      - name: Verify smoke result
+      - name: Verify autonomous cycle report
         run: |
           set -euo pipefail
-          test -s .career-os/native-smoke-result.json
+          test -s .career-os/autonomous-cycle-report.json
           python - <<'PY'
           import json
           from pathlib import Path
-          p = Path('.career-os/native-smoke-result.json')
-          data = json.loads(p.read_text())
-          if data.get('status') not in {'passed', 'success'}:
-              raise SystemExit(f"Native smoke did not pass: {data}")
-          print('Verified native smoke result:', data.get('status'))
+          data = json.loads(Path('.career-os/autonomous-cycle-report.json').read_text())
+          if data.get('success') is not True:
+              raise SystemExit(f"Autonomous backend cycle did not pass: {data}")
+          required = {'discovery', 'processing', 'finalization', 'smoke'}
+          observed = {step.get('step') for step in data.get('steps', []) if step.get('exit_code') == 0}
+          missing = required - observed
+          if missing:
+              raise SystemExit(f"Autonomous backend cycle missing successful steps: {sorted(missing)}")
+          print('Verified backend cycle stages:', ', '.join(sorted(required)))
           PY
 
-      - name: Upload production-gate artifact
+      - name: Upload production-gate reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: career-os-production-gate
-          path: .career-os/native-smoke-result.json
+          path: |
+            .career-os/autonomous-cycle-report.json
+            .career-os/native-smoke-result.json
+            .career-os/notion-worker-report.json
+            .career-os/public-job-api-report.json
+            .career-os/resume-finalize-report.json
+            .career-os/resume/
           if-no-files-found: warn
           include-hidden-files: true
