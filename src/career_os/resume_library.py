@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 DEFAULT_RESUME_LIBRARY_DATA_SOURCE_ID = "71806dff-39bf-4d1c-b3fd-022504d26c72"
 NOTION_VERSION = os.environ.get("NOTION_VERSION", "2026-03-11")
+NOTION_FILE_NAME_MAX = 100
 
 
 def normalize(value: str) -> str:
@@ -18,6 +20,18 @@ def rich_text(value: str) -> dict[str, Any]:
 
 def title(value: str) -> dict[str, Any]:
     return {"title": [{"type": "text", "text": {"content": str(value)[:1900]}}]}
+
+
+def bounded_filename(filename: str, max_length: int = NOTION_FILE_NAME_MAX) -> str:
+    """Bound a file-upload display name while preserving its extension."""
+    name = str(filename or "")
+    if len(name) <= max_length:
+        return name
+    suffix = Path(name).suffix
+    stem = name[: -len(suffix)] if suffix else name
+    if max_length <= len(suffix):
+        return name[:max_length]
+    return f"{stem[:max_length - len(suffix)]}{suffix}"
 
 
 def build_resume_library_properties(
@@ -53,7 +67,7 @@ def build_resume_library_properties(
     if file_upload_id:
         file_obj: dict[str, Any] = {"type": "file_upload", "file_upload": {"id": file_upload_id}}
         if filename:
-            file_obj["name"] = filename
+            file_obj["name"] = bounded_filename(filename)
         properties["File"] = {"files": [file_obj]}
     return properties
 
