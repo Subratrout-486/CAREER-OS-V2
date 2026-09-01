@@ -67,7 +67,7 @@ def _prop(page: dict[str, Any], name: str) -> str:
     if kind in {"title", "rich_text"}:
         return "".join(x.get("plain_text", "") for x in data).strip()
     if kind == "url":
-        return data or ""
+        return str(data or "")
     if kind in {"select", "status"}:
         return (data or {}).get("name", "")
     return ""
@@ -81,11 +81,15 @@ def _existing_urls() -> set[str]:
 
 def _create_notion_job(job: JobRecord) -> str:
     data_source_id = os.environ.get("NOTION_DATA_SOURCE_ID", DEFAULT_DATA_SOURCE_ID).replace("-", "")
+    # Pydantic HttpUrl values are not JSON serializable by json.dumps(). Normalize
+    # integration-bound URLs at the Notion boundary so API adapters can keep their
+    # strongly typed URL representation internally.
+    job_url = str(job.source_url) if job.source_url else None
     properties = {
         "Job": {"title": [{"type": "text", "text": {"content": job.title[:2000]}}]},
         "Company": {"rich_text": [{"type": "text", "text": {"content": job.company[:1900]}}]},
         "JD": {"rich_text": [{"type": "text", "text": {"content": (job.description or "")[:1900]}}]},
-        "Job URL": {"url": job.source_url or None},
+        "Job URL": {"url": job_url},
         "Location": {"rich_text": [{"type": "text", "text": {"content": (job.location or "")[:1900]}}]},
         "Source": {"rich_text": [{"type": "text", "text": {"content": (job.source or "Public API")[:1900]}}]},
         "Status": {"select": {"name": "Verified Active"}},
@@ -163,13 +167,13 @@ def main() -> int:
         if job.posted_at and job.posted_at.astimezone(timezone.utc) < cutoff:
             stale += 1
             continue
-        if job.source_url in existing_urls:
+        if str(job.source_url) in existing_urls:
             duplicates += 1
             continue
         job = _enrich(job)
         try:
             page_id = _create_notion_job(job)
-            existing_urls.add(job.source_url)
+            existing_urls.add(str(job.source_url))
             created += 1
             discovered.append({"job_id": str(job.job_id), "notion_page_id": page_id, "title": job.title, "company": job.company, "status": "queued"})
         except Exception as exc:
