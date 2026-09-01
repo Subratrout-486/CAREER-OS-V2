@@ -15,7 +15,7 @@ STEPS = (
     ("discovery", "scripts/public_job_api_worker.py", True),
     ("processing", "scripts/notion_job_worker_runtime.py", True),
     ("finalization", "scripts/notion_resume_finalize.py", True),
-    ("smoke", "scripts/native_job_smoke_test.py", False),
+    ("smoke", "scripts/native_job_smoke_test.py", True),
 )
 
 
@@ -50,7 +50,7 @@ def main() -> int:
                 systemic_failure = True
                 break
         results.extend(cycle_results)
-        if any(r["exit_code"] != 0 and r["step"] == "processing" for r in cycle_results):
+        if any(r["exit_code"] != 0 for r in cycle_results):
             break
 
     REPORT.parent.mkdir(parents=True, exist_ok=True)
