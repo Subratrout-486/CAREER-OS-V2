@@ -8,8 +8,9 @@ on:
     workflows: [CI]
     types: [completed]
     branches: [main]
+  # Keep the backend loop alive even when no code push occurs.
   schedule:
-    - cron: "17 3 * * *"
+    - cron: "17 * * * *"
 
 permissions:
   contents: read
