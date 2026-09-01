@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from uuid import UUID
 
 from career_os.models.application import ApplicationRecord, ApplicationStatus
 from career_os.models.job import JobRecord
@@ -37,9 +36,27 @@ class ApplicationManager:
         confirmation_evidence: str,
         submitted_at: datetime | None = None,
     ) -> ApplicationRecord:
+        evidence = confirmation_evidence.strip()
+        if not evidence:
+            raise ValueError("A confirmed submission requires evidence")
+
+        # A browser retry can happen after the external site already confirmed
+        # submission. Treat the same confirmation as idempotent and never append
+        # a second SUBMITTED event. Conflicting evidence is rejected because it
+        # may indicate a different application or stale execution result.
+        if application.status == ApplicationStatus.SUBMITTED:
+            previous = next(
+                (event.evidence for event in reversed(application.events)
+                 if event.to_status == ApplicationStatus.SUBMITTED),
+                None,
+            )
+            if previous == evidence:
+                return application
+            raise ValueError("Application is already SUBMITTED with different evidence")
+
         application.transition(
             ApplicationStatus.SUBMITTED,
-            evidence=confirmation_evidence,
+            evidence=evidence,
             now=submitted_at,
         )
         return application
