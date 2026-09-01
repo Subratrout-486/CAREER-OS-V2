@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import notion_job_worker
+from scripts import notion_job_worker
 from career_os.candidate_profile import load_candidate_source_of_truth
 from career_os.resume_artifact import resume_filename
 from career_os.application.submission_adapter import ApplicationSubmissionAdapter
