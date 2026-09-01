@@ -7,7 +7,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from career_os.application.browser_runner import BrowserApplicationRunner, ApplicationForm, FieldMapping, FormField, map_profile_fields
+from career_os.application.browser_runner import BrowserApplicationRunner, FieldMapping, FormField, map_profile_fields
 
 
 class ControllerStatus(str, Enum):
@@ -62,10 +62,12 @@ class BrowserAutomationController:
         return True
 
     async def step_inspect(self) -> BrowserAutomationState:
-        if not self._check_limit():
-            return self.state
+        if self.state is None:
+            raise RuntimeError("Controller not started")
         if self.state.status != ControllerStatus.READY:
             raise RuntimeError(f"Cannot inspect from status {self.state.status.value}")
+        if not self._check_limit():
+            return self.state
 
         try:
             form = await self.runner.inspect(self.state.url)
@@ -79,10 +81,12 @@ class BrowserAutomationController:
         return self.state
 
     def step_prepare(self, profile: dict[str, Any]) -> BrowserAutomationState:
-        if not self._check_limit():
-            return self.state
+        if self.state is None:
+            raise RuntimeError("Controller not started")
         if self.state.status != ControllerStatus.INSPECTED:
             raise RuntimeError(f"Cannot prepare mappings from status {self.state.status.value}")
+        if not self._check_limit():
+            return self.state
 
         fields = [FormField(**f) for f in self.state.form["fields"]]
         mappings = map_profile_fields(fields, profile)
@@ -110,6 +114,11 @@ class BrowserAutomationController:
             self.state.error = "Human approval rejected"
         else:
             if modifications is not None:
+                if not all(isinstance(item, dict) and isinstance(item.get("field"), dict) and item["field"].get("key") for item in modifications):
+                    self.state.status = ControllerStatus.FAILED
+                    self.state.error = "Invalid approval modifications"
+                    self._save()
+                    return self.state
                 self.state.mappings = modifications
             self.state.status = ControllerStatus.APPROVED
 
@@ -117,11 +126,12 @@ class BrowserAutomationController:
         return self.state
 
     async def step_fill(self) -> BrowserAutomationState:
-        if not self._check_limit():
-            return self.state
-
+        if self.state is None:
+            raise RuntimeError("Controller not started")
         if self.state.status != ControllerStatus.APPROVED:
             raise RuntimeError(f"Cannot fill from status {self.state.status.value}")
+        if not self._check_limit():
+            return self.state
 
         mappings = []
         for m in self.state.mappings:
