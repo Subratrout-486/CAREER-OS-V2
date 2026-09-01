@@ -1,1 +1,0 @@
-Production gate is configured by .github/workflows/production-gate.yml.
