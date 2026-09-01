@@ -1,0 +1,169 @@
+name: Career OS Autonomous Repair Loop
+
+on:
+  workflow_run:
+    workflows: [CI, Career OS Autonomous Loop]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Workflow to diagnose
+        required: false
+        default: CI
+        type: choice
+        options: [CI, Career OS Autonomous Loop]
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: career-os-autonomous-repair-main
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.11"
+  GEMINI_MODEL: gemini-3.6-flash
+
+jobs:
+  repair:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - name: Resolve failed run
+        id: context
+        shell: bash
+        env:
+          RUN_ID: ${{ github.event.workflow_run.id || '' }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name || inputs.target }}
+        run: |
+          set -euo pipefail
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          echo "workflow_name=${WORKFLOW_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Check out exact failed commit
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.context.outputs.head_sha }}
+          fetch-depth: 0
+
+      - name: Capture failure evidence
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ steps.context.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p .career-os
+          if [[ -n "$RUN_ID" ]]; then
+            gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --log-failed 2>&1 | tail -n 30000 > .career-os/self-heal-context.log || true
+          else
+            echo "Manual repair invocation; no triggering run log." > .career-os/self-heal-context.log
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install test dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m playwright install --with-deps chromium
+
+      - name: Prepare Archify evidence tool
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/tt-a1i/archify.git "$RUNNER_TEMP/archify"
+          node "$RUNNER_TEMP/archify/archify/bin/archify.mjs" doctor
+          node "$RUNNER_TEMP/archify/archify/bin/archify.mjs" guide "Map the Career OS autonomous repair flow: failed CI or autonomous cycle -> evidence -> diagnosis -> source repair -> focused tests -> full verification -> verified commit -> explicit CI dispatch -> repeat" --json > .career-os/archify-repair-guide.json
+
+      - name: Deterministic baseline
+        id: baseline
+        continue-on-error: true
+        env:
+          TRIGGER_WORKFLOW: ${{ steps.context.outputs.workflow_name }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID || '8374c380-f148-41ab-a77f-eb35de20f2db' }}
+          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+          PYTHONPATH: src
+        run: |
+          set -o pipefail
+          if [[ "$TRIGGER_WORKFLOW" == "Career OS Autonomous Loop" ]]; then
+            python scripts/autonomous_cycle.py 2>&1 | tee .career-os/self-heal-baseline.log
+          else
+            python -m pytest -q 2>&1 | tee .career-os/self-heal-baseline.log
+          fi
+
+      - name: Autonomous diagnose and repair with Gemini
+        id: gemini_repair
+        if: steps.baseline.outcome == 'failure'
+        continue-on-error: true
+        uses: google-github-actions/run-gemini-cli@v0
+        env:
+          GEMINI_CLI_TRUST_WORKSPACE: "true"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          gemini_model: ${{ env.GEMINI_MODEL }}
+          prompt: |
+            You are the autonomous repair engineer for CAREER-OS-V2.
+            Work directly in the checkout. Diagnose the actual failure from .career-os/self-heal-context.log and
+            .career-os/self-heal-baseline.log. Inspect source, tests, workflows, recent commits and
+            .career-os/archify-repair-guide.json. Reuse proven existing repository patterns when relevant.
+            Make the smallest root-cause repair. Never weaken/delete/skip tests, fabricate results, change secrets,
+            rewrite history, or push. Run focused tests and then the full failing verification command.
+            Continue fixing in this run until verification passes or document a genuine external blocker in
+            .career-os/gemini-repair-report.md. Leave the working tree containing the verified repair.
+
+      - name: Verify repaired tree
+        id: verify
+        if: steps.baseline.outcome == 'failure'
+        continue-on-error: true
+        env:
+          TRIGGER_WORKFLOW: ${{ steps.context.outputs.workflow_name }}
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          git diff --check
+          if [[ "$TRIGGER_WORKFLOW" == "Career OS Autonomous Loop" ]]; then
+            python scripts/autonomous_cycle.py
+          else
+            python -m pytest -q
+          fi
+
+      - name: Commit verified repair
+        if: steps.baseline.outcome == 'failure' && steps.verify.outcome == 'success'
+        run: |
+          set -euo pipefail
+          git config user.name "career-os-autonomous-repair[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git reset -- .career-os 2>/dev/null || true
+          git diff --cached --quiet && { echo "No verified source change produced."; exit 1; }
+          git commit -m "fix: autonomous repair from failed ${{ steps.context.outputs.workflow_name }}"
+          git push origin HEAD:main
+
+      - name: Re-enter CI after verified repair
+        if: steps.baseline.outcome == 'failure' && steps.verify.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref main
+
+      - name: Publish controller summary
+        if: always()
+        run: |
+          {
+            echo "## Career OS Autonomous Repair Controller"
+            echo "Trigger: ${{ steps.context.outputs.workflow_name }}"
+            echo "Commit: ${{ steps.context.outputs.head_sha }}"
+            echo "Baseline: ${{ steps.baseline.outcome }}"
+            echo "Gemini: ${{ steps.gemini_repair.outcome }}"
+            echo "Verification: ${{ steps.verify.outcome }}"
+          } >> "$GITHUB_STEP_SUMMARY"
