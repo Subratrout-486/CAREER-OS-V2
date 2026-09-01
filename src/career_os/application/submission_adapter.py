@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
+import os
 from typing import Any, Callable
 
 from career_os.agents.application_manager import ApplicationManager
@@ -18,11 +18,11 @@ class ExecutionOutcome:
 
 
 class ApplicationSubmissionAdapter:
-    """Bridge Career OS approval/state to the existing controlled browser agent.
+    """Bridge Career OS approval/state to a verified browser provider.
 
-    The browser implementation remains in ``scripts/application_agent.py`` so
-    there is one execution engine. This adapter owns the Career OS state
-    transition and refuses to turn an unverified browser result into SUBMITTED.
+    When the JobPilot local runtime is configured, it owns the authenticated
+    browser/session and application mechanics. Career OS remains the approval,
+    evidence and persistence control plane.
     """
 
     def __init__(self, manager: ApplicationManager | None = None, runner: Callable[..., Any] | None = None):
@@ -31,8 +31,10 @@ class ApplicationSubmissionAdapter:
 
     @staticmethod
     def _default_runner(job: dict[str, Any], profile: dict[str, Any], resume_path: str) -> Any:
+        if all(os.getenv(name, "").strip() for name in ("JOBPILOT_API", "JOBPILOT_API_TOKEN", "JOBPILOT_TERMINAL_URL")):
+            from career_os.application.jobpilot_executor import JobPilotExecutor
+            return JobPilotExecutor().execute(job, profile, resume_path)
         from scripts.application_agent import run_application
-
         return run_application(job, profile, resume_path)
 
     def execute(
@@ -62,9 +64,4 @@ class ApplicationSubmissionAdapter:
                 submitted_at=submitted_at,
             )
 
-        return ExecutionOutcome(
-            state=state,
-            submitted=submitted,
-            evidence=evidence,
-            blockers=blockers,
-        )
+        return ExecutionOutcome(state=state, submitted=submitted, evidence=evidence, blockers=blockers)
