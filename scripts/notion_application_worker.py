@@ -33,18 +33,12 @@ def _text(page: dict[str, Any], name: str) -> str:
 
 
 def _query(ds: str, query: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
-    """Query a Notion data source without sending invalid null filters.
-
-    Notion rejects ``filter: null``; omitting the optional filter is the
-    canonical unfiltered query. ``query`` and ``params`` are retained for the
-    worker's existing call contract.
-    """
+    """Query a Notion data source without sending invalid null filters."""
     body: dict[str, Any] = {"page_size": 100}
     response = notion_job_worker.notion_request(
         "POST", f"/data_sources/{ds.replace('-', '')}/query", body
     )
-    rows = response.get("results", []) or []
-    return rows
+    return response.get("results", []) or []
 
 
 def _eligible_jobs() -> list[dict[str, Any]]:
@@ -64,37 +58,47 @@ def _existing_application(job_url: str) -> dict[str, Any] | None:
         "POST", f"/data_sources/{APPLICATIONS_DS.replace('-', '')}/query", {"page_size": 100}
     )
     for row in response.get("results", []) or []:
-        if _text(row, "Job URL") == job_url and _text(row, "Status") == "Applied":
+        if _text(row, "Job URL") == job_url:
             return row
     return None
 
 
-def _create_application(job: dict[str, Any], result: Any, resume_name: str) -> str:
+def _application_properties(job: dict[str, Any], result: Any, resume_name: str) -> dict[str, Any]:
     job_url = _text(job, "Job URL")
-    existing = _existing_application(job_url)
-    if existing:
-        return str(existing.get("id", ""))
     evidence = "; ".join(result.evidence)
     title = f"{_text(job, 'Company')} — {_text(job, 'Job')}"
-    payload = {
-        "parent": {"data_source_id": APPLICATIONS_DS},
-        "properties": {
-            "Application": {"title": [{"type": "text", "text": {"content": title[:1900]}}]},
-            "Application URL": {"url": _text(job, "Application URL")},
-            "Job URL": {"url": job_url},
-            "Resume": {"rich_text": [{"type": "text", "text": {"content": resume_name[:1900]}}]},
-            "Status": {"select": {"name": "Applied"}},
-            "Submitted Date": {"date": {"start": datetime.now(timezone.utc).isoformat()}},
-            "Notes": {"rich_text": [{"type": "text", "text": {"content": f"Verified browser submission. Evidence: {evidence}"[:1900]}}]},
-            "Blockers": {"rich_text": []},
-        },
+    return {
+        "Application": {"title": [{"type": "text", "text": {"content": title[:1900]}}]},
+        "Application URL": {"url": _text(job, "Application URL")},
+        "Job URL": {"url": job_url},
+        "Resume": {"rich_text": [{"type": "text", "text": {"content": resume_name[:1900]}}]},
+        "Status": {"select": {"name": "Applied"}},
+        "Submitted Date": {"date": {"start": datetime.now(timezone.utc).isoformat()}},
+        "Notes": {"rich_text": [{"type": "text", "text": {"content": f"Verified browser submission. Evidence: {evidence}"[:1900]}}]},
+        "Blockers": {"rich_text": []},
     }
+
+
+def _create_application(job: dict[str, Any], result: Any, resume_name: str) -> str:
+    job_url = _text(job, "Job URL")
+    properties = _application_properties(job, result, resume_name)
+    existing = _existing_application(job_url)
+    if existing:
+        page_id = str(existing.get("id", ""))
+        if page_id:
+            notion_job_worker.notion_request("PATCH", f"/pages/{page_id}", {"properties": properties})
+        return page_id
     try:
-        created = notion_job_worker.notion_request("POST", "/pages", payload)
+        created = notion_job_worker.notion_request(
+            "POST", "/pages", {"parent": {"data_source_id": APPLICATIONS_DS}, "properties": properties}
+        )
     except Exception:
         existing = _existing_application(job_url)
         if existing:
-            return str(existing.get("id", ""))
+            page_id = str(existing.get("id", ""))
+            if page_id:
+                notion_job_worker.notion_request("PATCH", f"/pages/{page_id}", {"properties": properties})
+            return page_id
         raise
     return str(created.get("id", ""))
 
@@ -118,17 +122,10 @@ def main() -> int:
         company = _text(page, "Company")
         filename = resume_filename(str(profile["candidate"]["name"]), title)
         resume_path = ROOT / ".career-os" / "resume" / filename
-        job = {
-            "id": page.get("id"),
-            "application_url": _text(page, "Application URL"),
-            "application_decision": "apply",
-        }
+        job = {"id": page.get("id"), "application_url": _text(page, "Application URL"), "application_decision": "apply"}
         try:
             result = adapter.execute(
-                application=_application_record_from_page(page),
-                job=job,
-                profile=profile,
-                resume_path=str(resume_path),
+                application=_application_record_from_page(page), job=job, profile=profile, resume_path=str(resume_path)
             )
             row = {"job_id": page.get("id"), "job": title, "company": company, "submitted": result.submitted, "state": result.state, "evidence": list(result.evidence), "blockers": list(result.blockers)}
             if result.submitted:
@@ -152,7 +149,6 @@ def main() -> int:
 
 
 def _application_record_from_page(page: dict[str, Any]):
-    """Construct the domain record using the manager's existing job model."""
     from career_os.agents.application_manager import ApplicationManager
     from career_os.models.job import JobRecord, SourceType, canonical_job_key
 
