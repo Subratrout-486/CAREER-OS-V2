@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
+import time
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
@@ -14,12 +16,7 @@ from career_os.candidate_profile import load_candidate_source_of_truth
 from career_os.models.evidence import EvidenceClaim, EvidenceKind, EvidenceSource, SupportStatus
 from career_os.models.resume import ResumeBullet, ResumeProfile
 from career_os.pipeline import CareerPipeline
-from career_os.resume_artifact import (
-    render_resume_html,
-    render_resume_pdf,
-    resume_filename,
-    validate_resume_pdf,
-)
+from career_os.resume_artifact import render_resume_html, render_resume_pdf, resume_filename, validate_resume_pdf
 
 
 class _HTMLText(HTMLParser):
@@ -65,7 +62,7 @@ class _HTMLText(HTMLParser):
 
 
 def _fetch(url: str) -> str:
-    request = Request(url, headers={"User-Agent": "Career-OS-V2-native-smoke/1.1", "Accept": "text/html,application/xhtml+xml"})
+    request = Request(url, headers={"User-Agent": "Career-OS-V2-native-smoke/1.2", "Accept": "text/html,application/xhtml+xml"})
     with urlopen(request, timeout=25) as response:
         return response.read(8_000_000).decode("utf-8", errors="replace")
 
@@ -122,7 +119,6 @@ def _claims(profile: dict[str, object]) -> tuple[list[EvidenceClaim], ResumeProf
     source = EvidenceSource("candidate/source_of_truth.json", "candidate_source_of_truth", "Canonical candidate Source of Truth")
     claims: list[EvidenceClaim] = []
     bullets: list[ResumeBullet] = []
-
     for experience in profile["experience"]:
         company = str(experience.get("company", ""))
         title = str(experience.get("title", ""))
@@ -131,7 +127,6 @@ def _claims(profile: dict[str, object]) -> tuple[list[EvidenceClaim], ResumeProf
             claim = f"{company} — {title}: {responsibility}"
             claims.append(EvidenceClaim(claim_id, claim, EvidenceKind.VERIFIED, SupportStatus.SUPPORTED, 1.0, source))
             bullets.append(ResumeBullet(str(responsibility), (claim_id,)))
-
     for project in profile["projects"]:
         name = str(project.get("name", ""))
         for index, detail in enumerate(project.get("details", [])):
@@ -139,23 +134,15 @@ def _claims(profile: dict[str, object]) -> tuple[list[EvidenceClaim], ResumeProf
             claim = f"{name}: {detail}"
             claims.append(EvidenceClaim(claim_id, claim, EvidenceKind.VERIFIED, SupportStatus.SUPPORTED, 1.0, source))
             bullets.append(ResumeBullet(str(detail), (claim_id,)))
-
     for index, education in enumerate(profile.get("education", [])):
         qualification = str(education.get("qualification", ""))
         institution = str(education.get("institution", ""))
-        claim_id = f"education-{index}"
-        claim = f"Education: {qualification} — {institution}"
-        claims.append(EvidenceClaim(claim_id, claim, EvidenceKind.VERIFIED, SupportStatus.SUPPORTED, 1.0, source))
-
+        claims.append(EvidenceClaim(f"education-{index}", f"Education: {qualification} — {institution}", EvidenceKind.VERIFIED, SupportStatus.SUPPORTED, 1.0, source))
     skills = profile.get("skills_and_tools", {})
     for category, values in skills.items():
         for index, skill in enumerate(values if isinstance(values, list) else []):
-            claim_id = f"skill-{category}-{index}"
-            claim = f"{category}: {skill}"
-            claims.append(EvidenceClaim(claim_id, claim, EvidenceKind.VERIFIED, SupportStatus.SUPPORTED, 1.0, source))
-
-    summary = str(profile["candidate"]["professional_summary"])
-    return claims, ResumeProfile(summary=summary, bullets=tuple(bullets))
+            claims.append(EvidenceClaim(f"skill-{category}-{index}", f"{category}: {skill}", EvidenceKind.VERIFIED, SupportStatus.SUPPORTED, 1.0, source))
+    return claims, ResumeProfile(summary=str(profile["candidate"]["professional_summary"]), bullets=tuple(bullets))
 
 
 def main() -> int:
@@ -168,7 +155,6 @@ def main() -> int:
     parser_html = _HTMLText()
     parser_html.feed(html)
     posting = _job_posting(parser_html)
-
     title = str(posting.get("title") or parser_html._title.strip())
     description = str(posting.get("description") or "\n".join(parser_html.parts))
     company = _company(posting, parser_html, args.url, title)
@@ -183,38 +169,34 @@ def main() -> int:
     claims, resume = _claims(profile)
     raw_job = {"company": company or "Unknown employer", "title": title, "location": location, "source_url": args.url, "source": "official career page", "description": description, "posted_at": posting.get("datePosted") or posting.get("dateModified")}
 
-    run_id = "native-smoke-" + re.sub(r"[^a-z0-9]+", "-", title.casefold()).strip("-")[:70]
-    pipeline = CareerPipeline(Path(".career-os/native-smoke-checkpoint.json"))
+    # A smoke test is an independent verification run. It must not reuse the
+    # durable checkpoint from an earlier smoke run, otherwise a previously
+    # completed diagnostic run is incorrectly reported as a lifecycle failure.
+    run_key = hashlib.sha256(f"{args.url}\0{time.time_ns()}".encode()).hexdigest()[:16]
+    run_id = f"native-smoke-{run_key}"
+    checkpoint_path = Path(".career-os") / "native-smoke" / f"{run_id}.json"
+    pipeline = CareerPipeline(checkpoint_path)
     result = pipeline.run(run_id=run_id, raw_job=raw_job, resume=resume, claims=claims)
 
     candidate = profile["candidate"]
-    target_role = result.job.title
     resume_dir = Path(".career-os/resume")
     resume_dir.mkdir(parents=True, exist_ok=True)
-    resume_name = resume_filename(str(candidate["name"]), target_role)
-    resume_html = render_resume_html(profile, result.tailored_resume, target_role=target_role)
+    resume_name = resume_filename(str(candidate["name"]), result.job.title)
+    resume_html = render_resume_html(profile, result.tailored_resume, target_role=result.job.title)
     html_path = resume_dir / resume_name.replace(".pdf", ".html")
     pdf_path = resume_dir / resume_name
     html_path.write_text(resume_html, encoding="utf-8")
     render_resume_pdf(resume_html, pdf_path)
-
     resume_validation = validate_resume_pdf(pdf_path, str(candidate["name"]))
 
     output = {
-        "run_id": run_id,
-        "source_url": args.url,
-        "company": result.job.company,
-        "title": result.job.title,
-        "location": result.job.location,
-        "application_ready": result.application_ready,
-        "completed_stages": result.checkpoint.completed_stages,
-        "fit": result.fit.__dict__,
+        "run_id": run_id, "source_url": args.url, "company": result.job.company, "title": result.job.title,
+        "location": result.job.location, "application_ready": result.application_ready,
+        "completed_stages": result.checkpoint.completed_stages, "fit": result.fit.__dict__,
         "matched_keywords": list(result.tailored_resume.matched_keywords),
         "ats_findings": [finding.__dict__ for finding in result.ats_audit.findings],
         "recruiter_recommendation": result.recruiter_review.recommendation,
-        "resume_filename": resume_name,
-        "resume_pdf": str(pdf_path),
-        "resume_html": str(html_path),
+        "resume_filename": resume_name, "resume_pdf": str(pdf_path), "resume_html": str(html_path),
         "resume_validation": resume_validation,
     }
     output_path = Path(args.output)
