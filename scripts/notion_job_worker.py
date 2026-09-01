@@ -173,7 +173,7 @@ def append_resume(page_id: str, tailored: Any, result: Any) -> None:
     bullets = getattr(tailored, "bullets", ())
     lines = ["Career OS — Tailored Resume", str(getattr(tailored, "summary", ""))]
     lines.extend(f"• {getattr(b, 'text', str(b))}" for b in bullets)
-    lines += [f"Fit score: {getattr(result.fit, 'score', 'n/a')}", f"Application ready: {result.application_ready}"]
+    lines += [f"Fit score: {getattr(result.fit, 'overall', 'n/a')}", f"Application ready: {result.application_ready}"]
     children = [
         {"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": line[:1900]}}]}}
         for line in lines if line
@@ -223,7 +223,7 @@ def process(page: dict[str, Any], profile: dict[str, Any]) -> tuple[bool, str]:
             "Processing Stage": "Recruiter Review",
             "Status": "Shortlisted",
             "Resume Status": "Generating" if ready else "Needs Review",
-            "Fit Score": getattr(result.fit, "score", None),
+            "Fit Score": getattr(result.fit, "overall", None),
             "Fit Decision": "Apply" if ready else "Apply - Verify",
             "ATS Result": "PASS" if not findings else "REVIEW",
             "Blockers": blockers,
