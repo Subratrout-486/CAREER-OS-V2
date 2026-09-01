@@ -8,9 +8,6 @@ on:
 permissions:
   contents: read
 
-authorizations:
-  contents: read
-
 concurrency:
   group: career-os-production-gate
   cancel-in-progress: false
