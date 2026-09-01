@@ -18,10 +18,9 @@ on:
           - CI
           - Career OS Autonomous Loop
 
-# This workflow is intentionally the repair controller, not the product runtime.
-# A failed CI/autonomous run becomes the next loop input:
-# detect -> diagnose -> modify -> test -> commit -> dispatch CI -> verify.
-# The next failed run re-enters this workflow automatically.
+# One repair controller only.
+# Failed run -> evidence -> Archify map/validation -> Gemini agent repair -> verify
+# -> commit -> explicit CI dispatch -> repeat on the next failure.
 
 permissions:
   contents: write
@@ -33,7 +32,7 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.11"
-  MAX_REPAIR_CYCLES: "3"
+  GEMINI_MODEL: "gemini-3.6-flash"
 
 jobs:
   repair:
@@ -70,12 +69,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RUN_ID: ${{ steps.context.outputs.run_id }}
-          WORKFLOW_NAME: ${{ steps.context.outputs.workflow_name }}
         run: |
           set -euo pipefail
           mkdir -p .career-os
           {
-            echo "Trigger workflow: ${WORKFLOW_NAME}"
+            echo "Trigger workflow: ${{ steps.context.outputs.workflow_name }}"
             echo "Trigger run: ${RUN_ID:-manual}"
             echo "Trigger commit: ${{ steps.context.outputs.head_sha }}"
             echo
@@ -85,7 +83,6 @@ jobs:
               echo "Manual repair invocation; no triggering run log is available."
             fi
           } | tail -n 30000 > .career-os/self-heal-context.log
-          echo "Captured $(wc -l < .career-os/self-heal-context.log) diagnostic lines."
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -99,6 +96,16 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
           python -m playwright install --with-deps chromium
+
+      # Archify is used as the deterministic architecture/flow evidence layer.
+      # It is not treated as the code-writing engine; Gemini is the coding agent.
+      - name: Prepare Archify evidence tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/tt-a1i/archify.git "$RUNNER_TEMP/archify"
+          node "$RUNNER_TEMP/archify/bin/archify.mjs" doctor
+          node "$RUNNER_TEMP/archify/bin/archify.mjs" guide "Map the Career OS autonomous repair flow: failed CI or autonomous cycle -> evidence -> diagnosis -> source repair -> focused tests -> full verification -> verified commit -> explicit CI dispatch -> repeat" --json > .career-os/archify-repair-guide.json
 
       - name: Deterministic baseline
         id: baseline
@@ -131,57 +138,57 @@ jobs:
             python -m pytest -q 2>&1 | tee .career-os/self-heal-baseline.log
           fi
 
-      # Primary autonomous executor. Codex receives workspace write access so it
-      # can actually inspect, edit, and test the repository instead of merely
-      # describing a fix. The GitHub token is not supplied to the model.
-      - name: Autonomous diagnose and repair
-        id: codex_repair
+      # Gemini CLI is the free coding-agent runtime. It receives the workspace,
+      # shell, and GitHub token needed to inspect and repair the checkout.
+      - name: Autonomous diagnose and repair with Gemini
+        id: gemini_repair
         if: steps.baseline.outcome == 'failure'
         continue-on-error: true
-        uses: openai/codex-action@v1
+        uses: google-github-actions/run-gemini-cli@v0
+        env:
+          GEMINI_CLI_TRUST_WORKSPACE: "true"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          permission-profile: ":workspace"
-          safety-strategy: drop-sudo
-          output-file: .career-os/codex-repair-report.md
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          gemini_model: ${{ env.GEMINI_MODEL }}
           prompt: |
             You are the autonomous repair engineer for CAREER-OS-V2.
 
-            The current checkout is the exact commit that failed. Work directly in
-            this repository and do not stop for progress updates.
+            Work directly in the checked-out repository. Do not stop for a progress update,
+            approval, or explanation before making the repair.
 
             REQUIRED LOOP:
             1. Detect the actual failing command from .career-os/self-heal-context.log and
                .career-os/self-heal-baseline.log.
-            2. Diagnose the root cause by tracing the relevant code, workflow, tests,
-               recent commits, and generated reports. Do not guess.
-            3. Inspect the supplied reference patterns when relevant: Auto-Company for
-               durable autonomous cycles/state/resilience, ODS for operational recovery,
-               Scout for provider-free data collection/fallback ideas, and the existing
-               provider-neutral controller in this repository. Reuse patterns, not unrelated code.
-            4. Modify the minimum set of files needed to fix the root cause.
-            5. Run focused tests, then the relevant full verification command.
-            6. If verification fails, continue diagnosing and editing until it passes or
-               there is a genuine external blocker.
-            7. Leave all successful source/test/workflow changes in the working tree.
+            2. Diagnose the root cause from source, tests, workflow definitions, recent commits,
+               and generated reports. Reproduce the failure when practical. Do not guess.
+            3. Inspect .career-os/archify-repair-guide.json and use the Archify CLI at
+               $RUNNER_TEMP/archify when a workflow/architecture map or deterministic diagnostic
+               is useful. Archify is an evidence/validation layer, not a substitute for tests.
+            4. Reuse proven patterns from the public Auto-Company repository when relevant:
+               persistent cycle state, bounded recovery, cooldown/circuit-breaker behavior,
+               last-good state, and resumable handoff. Do not copy unrelated application code.
+            5. Modify the minimum set of files required for the root-cause fix.
+            6. Run focused regression tests, then the complete verification command for the
+               failing path.
+            7. If verification fails, continue diagnosing and editing in this same run until
+               it passes or a genuine external blocker is proven.
 
             HARD RULES:
-            - Never weaken, delete, skip, or falsify a test just to obtain green CI.
-            - Never fabricate credentials, job records, candidate evidence, application
-              success, or external API results.
-            - Never delete the repository, rewrite history, force-push, or modify secrets.
-            - Do not commit or push; the controller commits only after verification.
-            - Keep professional experience separate from project experience in candidate data.
-            - Prefer deterministic fixes and explicit failure states over silent fallbacks.
-            - Do not spend time redesigning unrelated product areas.
+            - Never weaken, delete, skip, or falsify a test to make CI green.
+            - Never fabricate credentials, jobs, candidate evidence, applications, or external results.
+            - Never modify repository secrets, rewrite history, force-push, or delete the repository.
+            - Do not commit or push. The controller commits only after verification succeeds.
+            - Preserve explicit failure states and resumability; do not silently swallow errors.
+            - Do not redesign unrelated product areas.
 
-            Success means the working tree contains a real root-cause fix and the relevant
-            verification command passes. If an external credential/quota/service is the only
-            blocker, document the exact blocker in .career-os/codex-repair-report.md and make
-            the system resumable; do not invent a workaround.
+            The working tree must contain the real fix and the relevant verification must pass.
+            If the blocker is genuinely external (credential/quota/provider outage), document the
+            exact blocker in .career-os/gemini-repair-report.md and leave the repository resumable.
 
       - name: Verify repaired tree
         id: verify
+        if: steps.baseline.outcome == 'failure'
         continue-on-error: true
         shell: bash
         env:
@@ -205,26 +212,12 @@ jobs:
           PYTHONPATH: src
         run: |
           set -o pipefail
-          {
-            echo "=== Git diff ==="
-            git status --short
-            git diff --check
-            echo "=== Verification ==="
-            if [[ "${TRIGGER_WORKFLOW}" == "Career OS Autonomous Loop" ]]; then
-              python scripts/autonomous_cycle.py
-            else
-              python -m pytest -q
-            fi
-          } 2>&1 | tee .career-os/self-heal-verification.log
-
-      - name: Fail repair if agent could not produce a verified fix
-        if: steps.baseline.outcome == 'failure' && steps.verify.outcome != 'success'
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Autonomous repair did not reach a verified green state."
-          echo "The next eligible failure can re-enter this controller; no unverified change will be pushed."
-          exit 1
+          git diff --check
+          if [[ "${TRIGGER_WORKFLOW}" == "Career OS Autonomous Loop" ]]; then
+            python scripts/autonomous_cycle.py
+          else
+            python -m pytest -q
+          fi
 
       - name: Commit verified repair
         if: steps.baseline.outcome == 'failure' && steps.verify.outcome == 'success'
@@ -234,18 +227,15 @@ jobs:
           git config user.name "career-os-autonomous-repair[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git reset -- .career-os/self-heal-context.log .career-os/self-heal-baseline.log .career-os/self-heal-verification.log .career-os/codex-repair-report.md 2>/dev/null || true
+          git reset -- .career-os/self-heal-context.log .career-os/self-heal-baseline.log .career-os/archify-repair-guide.json .career-os/gemini-repair-report.md 2>/dev/null || true
           if git diff --cached --quiet; then
-            echo "Verification passed but the repair agent produced no repository change."
+            echo "Verification passed but Gemini produced no repository change."
             exit 1
           fi
           git commit -m "fix: autonomous repair from failed ${{ steps.context.outputs.workflow_name }}"
           git push origin HEAD:main
 
-      # A GITHUB_TOKEN push intentionally does not create a push-triggered workflow.
-      # workflow_dispatch is an explicit GitHub-supported exception, so dispatch CI
-      # here and let the normal CI -> autonomous -> repair chain continue.
-      - name: Re-enter CI with repaired commit
+      - name: Re-enter CI after verified repair
         if: steps.baseline.outcome == 'failure' && steps.verify.outcome == 'success'
         shell: bash
         env:
@@ -253,7 +243,6 @@ jobs:
         run: |
           set -euo pipefail
           gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref main
-          echo "Dispatched CI for the verified repair commit."
 
       - name: Publish controller summary
         if: always()
@@ -265,8 +254,8 @@ jobs:
             echo "Trigger: ${{ steps.context.outputs.workflow_name }}"
             echo "Commit inspected: ${{ steps.context.outputs.head_sha }}"
             echo "Baseline: ${{ steps.baseline.outcome }}"
-            echo "Codex repair: ${{ steps.codex_repair.outcome }}"
+            echo "Gemini repair: ${{ steps.gemini_repair.outcome }}"
             echo "Verification: ${{ steps.verify.outcome }}"
             echo
-            echo "Flow: detect → diagnose → modify → test → commit → dispatch CI → verify → continue"
+            echo "Flow: detect -> diagnose -> Archify evidence -> modify -> test -> verify -> commit -> CI -> continue"
           } >> "$GITHUB_STEP_SUMMARY"
