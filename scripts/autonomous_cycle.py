@@ -14,7 +14,7 @@ REPORT = ROOT / ".career-os" / "autonomous-cycle-report.json"
 STEPS = (
     ("discovery", "scripts/public_job_api_worker.py", True),
     ("processing", "scripts/notion_job_worker_runtime.py", True),
-    ("finalization", "scripts/notion_resume_finalize.py", True),
+    ("finalization", "scripts/notion_resume_finalize_current.py", True),
     ("smoke", "scripts/native_job_smoke_test.py", True),
 )
 
