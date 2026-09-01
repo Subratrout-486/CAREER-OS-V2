@@ -1,4 +1,4 @@
-name: Ruflo Harness
+name: AI Stack Harness
 
 on:
   push:
@@ -11,27 +11,42 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node 20
+      - name: Setup Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
-      - name: Install Ruflo
+      - name: Install project tools
         run: npm install --no-audit --no-fund
 
-      - name: Verify Ruflo CLI
-        run: npm run ruflo:version
+      - name: Verify Ruflo
+        run: |
+          npm run ruflo:version
+          npm run ruflo:doctor
+          npx ruflo init
+          test -d .claude-flow && test -d .claude
 
-      - name: Run Ruflo doctor
-        run: npm run ruflo:doctor
+      - name: Install gstack for Codex
+        run: |
+          npm install -g bun
+          git clone --depth 1 https://github.com/garrytan/gstack.git .agents/skills/gstack
+          cd .agents/skills/gstack
+          ./setup --host codex
 
-      - name: Initialize Ruflo project
-        run: npx ruflo init
+      - name: Install Archify skill for Codex
+        run: npx -y skills add tt-a1i/archify --skill archify --agent codex --global --copy --yes
 
-      - name: Verify Ruflo project files
-        run: test -d .claude-flow && test -d .claude
+      - name: Verify OmniRoute
+        run: |
+          npm install -g omniroute
+          omniroute --version
+
+      - name: Verify Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama --version
