@@ -1,4 +1,4 @@
-name: Career OS Self-Healing Repair
+name: Career OS Autonomous Repair Loop
 
 on:
   workflow_run:
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Workflow to diagnose (CI or Career OS Autonomous Loop)"
+        description: "Workflow to diagnose"
         required: false
         default: "CI"
         type: choice
@@ -18,17 +18,22 @@ on:
           - CI
           - Career OS Autonomous Loop
 
+# This workflow is intentionally the repair controller, not the product runtime.
+# A failed CI/autonomous run becomes the next loop input:
+# detect -> diagnose -> modify -> test -> commit -> dispatch CI -> verify.
+# The next failed run re-enters this workflow automatically.
+
 permissions:
   contents: write
   actions: write
 
 concurrency:
-  group: career-os-self-healing-main
+  group: career-os-autonomous-repair-main
   cancel-in-progress: false
 
 env:
-  MAX_REPAIR_ATTEMPTS: "3"
   PYTHON_VERSION: "3.11"
+  MAX_REPAIR_CYCLES: "3"
 
 jobs:
   repair:
@@ -40,19 +45,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
-      - name: Resolve triggering run
+      - name: Resolve failed run
         id: context
         shell: bash
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          TRIGGER_RUN_ID: ${{ github.event.workflow_run.id || '' }}
-          TRIGGER_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-          TRIGGER_NAME: ${{ github.event.workflow_run.name || inputs.target }}
+          RUN_ID: ${{ github.event.workflow_run.id || '' }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name || inputs.target }}
         run: |
           set -euo pipefail
-          echo "run_id=${TRIGGER_RUN_ID}" >> "$GITHUB_OUTPUT"
-          echo "head_sha=${TRIGGER_SHA}" >> "$GITHUB_OUTPUT"
-          echo "workflow_name=${TRIGGER_NAME}" >> "$GITHUB_OUTPUT"
+          echo "run_id=${RUN_ID}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          echo "workflow_name=${WORKFLOW_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: Check out exact failed commit
         uses: actions/checkout@v5
@@ -61,7 +65,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: true
 
-      - name: Capture triggering failure context
+      - name: Capture failure evidence
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -80,15 +84,15 @@ jobs:
             else
               echo "Manual repair invocation; no triggering run log is available."
             fi
-          } | tail -n 20000 > .career-os/self-heal-context.log
-          echo "Captured $(wc -l < .career-os/self-heal-context.log) lines of diagnostic context."
+          } | tail -n 30000 > .career-os/self-heal-context.log
+          echo "Captured $(wc -l < .career-os/self-heal-context.log) diagnostic lines."
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install Career OS test dependencies
+      - name: Install test dependencies
         shell: bash
         run: |
           set -euo pipefail
@@ -96,7 +100,7 @@ jobs:
           python -m pip install -e ".[dev]"
           python -m playwright install --with-deps chromium
 
-      - name: Baseline verification
+      - name: Deterministic baseline
         id: baseline
         continue-on-error: true
         shell: bash
@@ -127,51 +131,57 @@ jobs:
             python -m pytest -q 2>&1 | tee .career-os/self-heal-baseline.log
           fi
 
-      - name: Autonomous repair attempt 1
+      # Primary autonomous executor. Codex receives workspace write access so it
+      # can actually inspect, edit, and test the repository instead of merely
+      # describing a fix. The GitHub token is not supplied to the model.
+      - name: Autonomous diagnose and repair
+        id: codex_repair
         if: steps.baseline.outcome == 'failure'
-        id: repair1
-        uses: google-github-actions/run-gemini-cli@v0
-        env:
-          GEMINI_CLI_TRUST_WORKSPACE: "true"
+        continue-on-error: true
+        uses: openai/codex-action@v1
         with:
-          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-          settings: |
-            {
-              "maxSessionTurns": 50,
-              "telemetry": {"enabled": false}
-            }
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          permission-profile: ":workspace"
+          safety-strategy: drop-sudo
+          output-file: .career-os/codex-repair-report.md
           prompt: |
-            You are the primary autonomous repair engineer for CAREER-OS-V2.
+            You are the autonomous repair engineer for CAREER-OS-V2.
 
-            The repository is trusted and you have permission to modify its working tree.
-            Diagnose the failure before changing anything. Read:
-              - .career-os/self-heal-context.log
-              - .career-os/self-heal-baseline.log
-              - README.md
-              - pyproject.toml
-              - the failing workflow and relevant source/tests
-            Use the supplied reference architecture from Auto-Company: bounded autonomous
-            cycles, explicit state, failure diagnosis, retry/backoff, and convergence.
-            Use ODS/Scout only when relevant to the failing subsystem; do not copy unrelated
-            product code into Career OS.
+            The current checkout is the exact commit that failed. Work directly in
+            this repository and do not stop for progress updates.
 
-            Rules:
-              1. Fix the root cause, not merely the symptom.
-              2. Do not weaken, delete, skip, or falsify tests.
-              3. Do not remove working product functionality to make CI green.
-              4. Do not fabricate credentials, job data, candidate evidence, or API success.
-              5. Keep professional experience and project experience distinct in candidate data.
-              6. You may modify application code, tests, scripts, and workflow configuration when required.
-              7. Do NOT commit or push. Leave the repair in the working tree for verification.
-              8. Run focused tests after the change when practical.
-              9. If the failure is genuinely caused by missing external credentials/service availability,
-                 make the system fail clearly and resumably rather than inventing a workaround.
+            REQUIRED LOOP:
+            1. Detect the actual failing command from .career-os/self-heal-context.log and
+               .career-os/self-heal-baseline.log.
+            2. Diagnose the root cause by tracing the relevant code, workflow, tests,
+               recent commits, and generated reports. Do not guess.
+            3. Inspect the supplied reference patterns when relevant: Auto-Company for
+               durable autonomous cycles/state/resilience, ODS for operational recovery,
+               Scout for provider-free data collection/fallback ideas, and the existing
+               provider-neutral controller in this repository. Reuse patterns, not unrelated code.
+            4. Modify the minimum set of files needed to fix the root cause.
+            5. Run focused tests, then the relevant full verification command.
+            6. If verification fails, continue diagnosing and editing until it passes or
+               there is a genuine external blocker.
+            7. Leave all successful source/test/workflow changes in the working tree.
 
-            Goal: leave the working tree in a state where the relevant verification command can pass.
+            HARD RULES:
+            - Never weaken, delete, skip, or falsify a test just to obtain green CI.
+            - Never fabricate credentials, job records, candidate evidence, application
+              success, or external API results.
+            - Never delete the repository, rewrite history, force-push, or modify secrets.
+            - Do not commit or push; the controller commits only after verification.
+            - Keep professional experience separate from project experience in candidate data.
+            - Prefer deterministic fixes and explicit failure states over silent fallbacks.
+            - Do not spend time redesigning unrelated product areas.
 
-      - name: Verification after repair 1
-        if: steps.baseline.outcome == 'failure'
-        id: verify1
+            Success means the working tree contains a real root-cause fix and the relevant
+            verification command passes. If an external credential/quota/service is the only
+            blocker, document the exact blocker in .career-os/codex-repair-report.md and make
+            the system resumable; do not invent a workaround.
+
+      - name: Verify repaired tree
+        id: verify
         continue-on-error: true
         shell: bash
         env:
@@ -195,160 +205,68 @@ jobs:
           PYTHONPATH: src
         run: |
           set -o pipefail
-          if [[ "${TRIGGER_WORKFLOW}" == "Career OS Autonomous Loop" ]]; then
-            python scripts/autonomous_cycle.py 2>&1 | tee .career-os/self-heal-verify-1.log
-          else
-            python -m pytest -q 2>&1 | tee .career-os/self-heal-verify-1.log
-          fi
+          {
+            echo "=== Git diff ==="
+            git status --short
+            git diff --check
+            echo "=== Verification ==="
+            if [[ "${TRIGGER_WORKFLOW}" == "Career OS Autonomous Loop" ]]; then
+              python scripts/autonomous_cycle.py
+            else
+              python -m pytest -q
+            fi
+          } 2>&1 | tee .career-os/self-heal-verification.log
 
-      - name: Autonomous repair attempt 2
-        if: steps.verify1.outcome == 'failure'
-        id: repair2
-        uses: google-github-actions/run-gemini-cli@v0
-        env:
-          GEMINI_CLI_TRUST_WORKSPACE: "true"
-        with:
-          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-          settings: |
-            {
-              "maxSessionTurns": 50,
-              "telemetry": {"enabled": false}
-            }
-          prompt: |
-            Continue the autonomous repair loop for CAREER-OS-V2.
-            A previous repair attempt did not pass verification.
-            Read the complete current working tree plus:
-              - .career-os/self-heal-context.log
-              - .career-os/self-heal-baseline.log
-              - .career-os/self-heal-verify-1.log
-            Re-diagnose from evidence; do not assume the first repair was correct.
-            Implement the smallest robust root-cause fix. Preserve tests and product behavior.
-            Do not bypass external integrations or fabricate success.
-            Do not commit or push. Run focused verification. If the remaining failure is external,
-            make the failure explicit and resumable rather than weakening the acceptance criteria.
-
-      - name: Verification after repair 2
-        if: steps.verify1.outcome == 'failure'
-        id: verify2
-        continue-on-error: true
+      - name: Fail repair if agent could not produce a verified fix
+        if: steps.baseline.outcome == 'failure' && steps.verify.outcome != 'success'
         shell: bash
-        env:
-          TRIGGER_WORKFLOW: ${{ steps.context.outputs.workflow_name }}
-          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID || '8374c380-f148-41ab-a77f-eb35de20f2db' }}
-          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
-          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
-          CAREER_OS_PUBLIC_JOB_QUERY: ${{ vars.CAREER_OS_PUBLIC_JOB_QUERY || 'support engineer,application support,production support,software support' }}
-          CAREER_OS_ADZUNA_QUERY: ${{ vars.CAREER_OS_ADZUNA_QUERY || '' }}
-          CAREER_OS_ADZUNA_COUNTRY: ${{ vars.CAREER_OS_ADZUNA_COUNTRY || 'in' }}
-          CAREER_OS_ADZUNA_LOCATION: ${{ vars.CAREER_OS_ADZUNA_LOCATION || 'India' }}
-          CAREER_OS_ARBEITNOW_QUERY: ${{ vars.CAREER_OS_ARBEITNOW_QUERY || 'support' }}
-          CAREER_OS_ARBEITNOW_LOCATION: ${{ vars.CAREER_OS_ARBEITNOW_LOCATION || '' }}
-          CAREER_OS_ARBEITNOW_REMOTE_ONLY: ${{ vars.CAREER_OS_ARBEITNOW_REMOTE_ONLY || 'false' }}
-          CAREER_OS_PUBLIC_API_MAX_JOBS: "10"
-          CAREER_OS_PUBLIC_API_MAX_AGE_DAYS: "2"
-          CAREER_OS_MAX_JOBS: "10"
-          CAREER_OS_NOTION_PAGE_SIZE: "25"
-          CAREER_OS_CYCLE_PASSES: "1"
-          PYTHONPATH: src
-        run: |
-          set -o pipefail
-          if [[ "${TRIGGER_WORKFLOW}" == "Career OS Autonomous Loop" ]]; then
-            python scripts/autonomous_cycle.py 2>&1 | tee .career-os/self-heal-verify-2.log
-          else
-            python -m pytest -q 2>&1 | tee .career-os/self-heal-verify-2.log
-          fi
-
-      - name: Autonomous repair attempt 3
-        if: steps.verify2.outcome == 'failure'
-        id: repair3
-        uses: google-github-actions/run-gemini-cli@v0
-        env:
-          GEMINI_CLI_TRUST_WORKSPACE: "true"
-        with:
-          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-          settings: |
-            {
-              "maxSessionTurns": 60,
-              "telemetry": {"enabled": false}
-            }
-          prompt: |
-            Final bounded repair attempt for CAREER-OS-V2.
-            Read all prior diagnostic and verification logs in .career-os/.
-            Find the actual remaining root cause and repair it without weakening acceptance criteria.
-            You may refactor the previous attempted fix if it was wrong.
-            Preserve security, candidate truth constraints, live integrations, and test coverage.
-            Do not commit or push. Run the strongest relevant verification before finishing.
-
-      - name: Final verification
-        id: final_verify
-        continue-on-error: true
-        shell: bash
-        env:
-          TRIGGER_WORKFLOW: ${{ steps.context.outputs.workflow_name }}
-          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID || '8374c380-f148-41ab-a77f-eb35de20f2db' }}
-          ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
-          ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
-          CAREER_OS_PUBLIC_JOB_QUERY: ${{ vars.CAREER_OS_PUBLIC_JOB_QUERY || 'support engineer,application support,production support,software support' }}
-          CAREER_OS_ADZUNA_QUERY: ${{ vars.CAREER_OS_ADZUNA_QUERY || '' }}
-          CAREER_OS_ADZUNA_COUNTRY: ${{ vars.CAREER_OS_ADZUNA_COUNTRY || 'in' }}
-          CAREER_OS_ADZUNA_LOCATION: ${{ vars.CAREER_OS_ADZUNA_LOCATION || 'India' }}
-          CAREER_OS_ARBEITNOW_QUERY: ${{ vars.CAREER_OS_ARBEITNOW_QUERY || 'support' }}
-          CAREER_OS_ARBEITNOW_LOCATION: ${{ vars.CAREER_OS_ARBEITNOW_LOCATION || '' }}
-          CAREER_OS_ARBEITNOW_REMOTE_ONLY: ${{ vars.CAREER_OS_ARBEITNOW_REMOTE_ONLY || 'false' }}
-          CAREER_OS_PUBLIC_API_MAX_JOBS: "10"
-          CAREER_OS_PUBLIC_API_MAX_AGE_DAYS: "2"
-          CAREER_OS_MAX_JOBS: "10"
-          CAREER_OS_NOTION_PAGE_SIZE: "25"
-          CAREER_OS_CYCLE_PASSES: "1"
-          PYTHONPATH: src
-        run: |
-          set -o pipefail
-          if [[ "${TRIGGER_WORKFLOW}" == "Career OS Autonomous Loop" ]]; then
-            python scripts/autonomous_cycle.py 2>&1 | tee .career-os/self-heal-final.log
-          else
-            python -m pytest -q 2>&1 | tee .career-os/self-heal-final.log
-          fi
-
-      - name: Commit verified repair
-        if: steps.final_verify.outcome == 'success'
-        shell: bash
-        env:
-          TRIGGER_SHA: ${{ steps.context.outputs.head_sha }}
         run: |
           set -euo pipefail
-          git config user.name "career-os-self-healing[bot]"
-          git config user.email "career-os-self-healing[bot]@users.noreply.github.com"
-          git fetch origin main --quiet
-          CURRENT_MAIN="$(git rev-parse origin/main)"
-          if [[ "${CURRENT_MAIN}" != "${TRIGGER_SHA}" ]]; then
-            echo "main advanced from ${TRIGGER_SHA} to ${CURRENT_MAIN}; refusing to overwrite newer work."
+          echo "Autonomous repair did not reach a verified green state."
+          echo "The next eligible failure can re-enter this controller; no unverified change will be pushed."
+          exit 1
+
+      - name: Commit verified repair
+        if: steps.baseline.outcome == 'failure' && steps.verify.outcome == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "career-os-autonomous-repair[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git reset -- .career-os/self-heal-context.log .career-os/self-heal-baseline.log .career-os/self-heal-verification.log .career-os/codex-repair-report.md 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "Verification passed but the repair agent produced no repository change."
             exit 1
           fi
-          rm -f .career-os/self-heal-context.log .career-os/self-heal-baseline.log .career-os/self-heal-verify-1.log .career-os/self-heal-verify-2.log .career-os/self-heal-final.log
-          git add -A
-          if git diff --cached --quiet; then
-            echo "Verification passed but no repository changes were produced. Nothing to commit."
-            exit 0
-          fi
-          git commit -m "fix: autonomous repair after failed ${{ steps.context.outputs.workflow_name }}"
+          git commit -m "fix: autonomous repair from failed ${{ steps.context.outputs.workflow_name }}"
           git push origin HEAD:main
 
-      - name: Trigger CI verification for repaired main
-        if: steps.final_verify.outcome == 'success'
+      # A GITHUB_TOKEN push intentionally does not create a push-triggered workflow.
+      # workflow_dispatch is an explicit GitHub-supported exception, so dispatch CI
+      # here and let the normal CI -> autonomous -> repair chain continue.
+      - name: Re-enter CI with repaired commit
+        if: steps.baseline.outcome == 'failure' && steps.verify.outcome == 'success'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh workflow run ci.yml --repo "${GITHUB_REPOSITORY}" --ref main
-          echo "CI verification dispatched for repaired main."
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref main
+          echo "Dispatched CI for the verified repair commit."
 
-      - name: Report bounded repair failure
-        if: steps.final_verify.outcome == 'failure'
+      - name: Publish controller summary
+        if: always()
         shell: bash
         run: |
-          echo "Self-healing exhausted its bounded repair budget without a passing verification."
-          echo "The repository was not committed by the repair loop."
-          exit 1
+          {
+            echo "## Career OS Autonomous Repair Controller"
+            echo
+            echo "Trigger: ${{ steps.context.outputs.workflow_name }}"
+            echo "Commit inspected: ${{ steps.context.outputs.head_sha }}"
+            echo "Baseline: ${{ steps.baseline.outcome }}"
+            echo "Codex repair: ${{ steps.codex_repair.outcome }}"
+            echo "Verification: ${{ steps.verify.outcome }}"
+            echo
+            echo "Flow: detect → diagnose → modify → test → commit → dispatch CI → verify → continue"
+          } >> "$GITHUB_STEP_SUMMARY"
