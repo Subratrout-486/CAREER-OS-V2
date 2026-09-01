@@ -31,7 +31,7 @@ def test_jobpilot_executor_builds_campaign_and_dispatches_browser(monkeypatch):
         raise AssertionError(path)
 
     def terminal(path, body):
-        calls.append(("terminal", path, body))
+        calls.append(("terminal", None, path, body))
         return {}
 
     monkeypatch.setattr(executor, "_request", request)
