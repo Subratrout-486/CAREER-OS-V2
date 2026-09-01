@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Read job-opportunity emails from Gmail and create deduplicated Career OS Notion jobs."""
+"""Read job-opportunity emails from Gmail and create deduplicated Career OS Notion jobs.
+
+Uses Gmail OAuth refresh tokens directly (no third-party service) and the existing
+Notion Jobs data source as the canonical queue. It is intentionally read-only on
+Gmail: messages are never marked read, moved, labelled, or deleted.
+"""
 from __future__ import annotations
 
 import base64
@@ -38,6 +43,14 @@ class _HTMLText(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.parts: list[str] = []
+        self.hrefs: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "a":
+            return
+        href = dict(attrs).get("href")
+        if href and re.match(r"https?://", href, re.I):
+            self.hrefs.append(href.strip())
 
     def handle_data(self, data: str) -> None:
         self.parts.append(data)
@@ -80,7 +93,7 @@ def _decode_b64url(value: str) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
-def _collect_parts(part: dict[str, Any], texts: list[str]) -> None:
+def _collect_parts(part: dict[str, Any], texts: list[str], hrefs: list[str]) -> None:
     mime = part.get("mimeType", "")
     data = (part.get("body", {}) or {}).get("data")
     if data and mime in {"text/plain", "text/html"}:
@@ -89,21 +102,27 @@ def _collect_parts(part: dict[str, Any], texts: list[str]) -> None:
             parser = _HTMLText()
             parser.feed(decoded)
             decoded = parser.text()
+            hrefs.extend(parser.hrefs)
         texts.append(decoded)
     for child in part.get("parts", []) or []:
-        _collect_parts(child, texts)
+        _collect_parts(child, texts, hrefs)
 
 
 def message_text(message: dict[str, Any]) -> tuple[dict[str, str], str]:
     headers = {h.get("name", "").lower(): h.get("value", "") for h in (message.get("payload", {}) or {}).get("headers", [])}
     texts: list[str] = []
-    _collect_parts(message.get("payload", {}) or {}, texts)
-    return headers, ("\n".join(x for x in texts if x).strip() or str(message.get("snippet", "")))
+    hrefs: list[str] = []
+    _collect_parts(message.get("payload", {}) or {}, texts, hrefs)
+    text = "\n".join(x for x in texts if x).strip() or str(message.get("snippet", ""))
+    eligible_hrefs = [u.rstrip(".,);]>") for u in hrefs if not re.search(r"(unsubscribe|privacy|google|facebook|linkedin\\.com/help)", u, re.I)]
+    if eligible_hrefs:
+        text = text + "\n" + "\n".join(eligible_hrefs)
+    return headers, text
 
 
 def extract_url(text: str) -> str:
     urls = [u.rstrip(".,);]>") for u in URL_RE.findall(text)]
-    preferred = [u for u in urls if not re.search(r"(unsubscribe|privacy|google|facebook|linkedin\.com/help)", u, re.I)]
+    preferred = [u for u in urls if not re.search(r"(unsubscribe|privacy|google|facebook|linkedin\\.com/help)", u, re.I)]
     return (preferred or urls)[0] if (preferred or urls) else ""
 
 
@@ -242,10 +261,7 @@ def existing_keys(token: str, data_source_id: str, props: dict[str, dict[str, An
 
 
 def create_page(notion_token: str, data_source_id: str, properties: dict[str, Any], body: str) -> str:
-    children = [
-        {"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": chunk}}]}}
-        for chunk in _chunks(body)
-    ]
+    children = [{"object": "block", "type": "paragraph", "paragraph": {"rich_text": [{"type": "text", "text": {"content": chunk}}]}} for chunk in _chunks(body)]
     response = notion_request("/pages", notion_token, method="POST", body={"parent": {"data_source_id": data_source_id}, "properties": properties, "children": children[:100]})
     return str(response.get("id", ""))
 

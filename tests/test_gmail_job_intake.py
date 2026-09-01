@@ -17,6 +17,15 @@ def test_extract_url_ignores_unsubscribe_links():
     assert module.extract_url(text) == "https://careers.example.com/jobs/123"
 
 
+def test_html_anchor_href_is_retained_for_url_extraction():
+    import base64
+    html_body = '<html><body><a href="https://careers.example.com/jobs/456">Apply now</a></body></html>'
+    encoded = base64.urlsafe_b64encode(html_body.encode()).decode().rstrip("=")
+    message = {"payload": {"headers": [], "mimeType": "text/html", "body": {"data": encoded}}}
+    _, body = module.message_text(message)
+    assert module.extract_url(body) == "https://careers.example.com/jobs/456"
+
+
 def test_build_properties_respects_live_notion_property_types():
     props = {
         "Job": {"type": "title", "title": {}},
