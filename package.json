@@ -1,0 +1,13 @@
+{
+  "name": "career-os-v2-harness",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Ruflo execution harness for CAREER-OS-V2 autonomous engineering",
+  "devDependencies": {
+    "ruflo": "3.38.20"
+  },
+  "scripts": {
+    "ruflo:version": "ruflo --version",
+    "ruflo:doctor": "ruflo doctor"
+  }
+}
