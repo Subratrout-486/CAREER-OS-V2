@@ -37,6 +37,7 @@ EXCLUDE_TERMS = re.compile(
 )
 URL_RE = re.compile(r"https?://[^\s<>\"']+", re.I)
 TITLE_RE = re.compile(r"(?i)(?:position|role|job|opening|opportunity)\s*[:\-–—]\s*([^|\n]{3,120})")
+URL_EXCLUDE_RE = re.compile(r"(?:unsubscribe|privacy|google|facebook|linkedin\.com/help)", re.I)
 
 
 class _HTMLText(HTMLParser):
@@ -114,15 +115,15 @@ def message_text(message: dict[str, Any]) -> tuple[dict[str, str], str]:
     hrefs: list[str] = []
     _collect_parts(message.get("payload", {}) or {}, texts, hrefs)
     text = "\n".join(x for x in texts if x).strip() or str(message.get("snippet", ""))
-    eligible_hrefs = [u.rstrip(".,);]>") for u in hrefs if not re.search(r"(unsubscribe|privacy|google|facebook|linkedin\\.com/help)", u, re.I)]
+    eligible_hrefs = [u.rstrip(".,);]>") for u in hrefs if not URL_EXCLUDE_RE.search(u)]
     if eligible_hrefs:
-        text = text + "\n" + "\n".join(eligible_hrefs)
+        text = "\n".join(eligible_hrefs) + "\n" + text
     return headers, text
 
 
 def extract_url(text: str) -> str:
     urls = [u.rstrip(".,);]>") for u in URL_RE.findall(text)]
-    preferred = [u for u in urls if not re.search(r"(unsubscribe|privacy|google|facebook|linkedin\\.com/help)", u, re.I)]
+    preferred = [u for u in urls if not URL_EXCLUDE_RE.search(u)]
     return (preferred or urls)[0] if (preferred or urls) else ""
 
 
