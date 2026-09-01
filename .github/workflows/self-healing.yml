@@ -118,9 +118,10 @@ jobs:
             .career-os/self-heal-baseline.log. Inspect source, tests, workflows, recent commits and
             .career-os/archify-repair-guide.json. Reuse proven existing repository patterns when relevant.
             Make the smallest root-cause repair. Never weaken/delete/skip tests, fabricate results, change secrets,
-            rewrite history, or push. Run focused tests and then the full failing verification command.
+            rewrite history, or push. Do not add generated logs, CLI artifacts, or tool configuration to the repair.
+            Run focused tests and then the full failing verification command.
             Continue fixing in this run until verification passes or document a genuine external blocker in
-            .career-os/gemini-repair-report.md. Leave the working tree containing the verified repair.
+            .career-os/gemini-repair-report.md. Leave the working tree containing only the verified source/test/workflow repair.
 
       - name: Verify repaired tree
         id: verify
@@ -138,15 +139,47 @@ jobs:
             python -m pytest -q
           fi
 
+      - name: Prepare verified repair patch
+        id: patch
+        if: steps.baseline.outcome == 'failure' && steps.verify.outcome == 'success'
+        run: |
+          set -euo pipefail
+          # Only source/test/workflow changes are eligible to leave the repair runner.
+          rm -rf .gemini gemini-artifacts
+          git add -A
+          git reset -- .career-os 2>/dev/null || true
+          git diff --cached --quiet && { echo "No verified source change produced."; exit 1; }
+          git diff --cached > "$RUNNER_TEMP/verified-repair.patch"
+
+      - name: Rebase verified repair onto current main
+        if: steps.baseline.outcome == 'failure' && steps.verify.outcome == 'success'
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git reset --hard origin/main
+          git clean -fd .gemini gemini-artifacts .career-os 2>/dev/null || true
+          git apply --index --3way "$RUNNER_TEMP/verified-repair.patch"
+          git diff --cached --check
+
+      - name: Re-verify after rebase
+        if: steps.baseline.outcome == 'failure' && steps.verify.outcome == 'success'
+        env:
+          TRIGGER_WORKFLOW: ${{ steps.context.outputs.workflow_name }}
+          PYTHONPATH: src
+        run: |
+          set -euo pipefail
+          if [[ "$TRIGGER_WORKFLOW" == "Career OS Autonomous Loop" ]]; then
+            python scripts/autonomous_cycle.py
+          else
+            python -m pytest -q
+          fi
+
       - name: Commit verified repair
         if: steps.baseline.outcome == 'failure' && steps.verify.outcome == 'success'
         run: |
           set -euo pipefail
           git config user.name "career-os-autonomous-repair[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git reset -- .career-os 2>/dev/null || true
-          git diff --cached --quiet && { echo "No verified source change produced."; exit 1; }
           git commit -m "fix: autonomous repair from failed ${{ steps.context.outputs.workflow_name }}"
           git push origin HEAD:main
 
