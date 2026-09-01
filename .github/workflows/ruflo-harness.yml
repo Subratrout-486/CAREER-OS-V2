@@ -1,0 +1,38 @@
+name: Ruflo Harness
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Ruflo
+        run: npm install --no-audit --no-fund
+
+      - name: Verify Ruflo CLI
+        run: npm run ruflo:version
+
+      - name: Run Ruflo doctor
+        run: npm run ruflo:doctor
+
+      - name: Initialize Ruflo project
+        run: npx ruflo init
+
+      - name: Verify Ruflo project files
+        run: test -d .claude-flow && test -d .claude
