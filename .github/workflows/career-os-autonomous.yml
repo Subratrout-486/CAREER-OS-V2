@@ -59,6 +59,20 @@ jobs:
         shell: bash
         run: python -m playwright install --with-deps chromium
 
+      - name: Intake job opportunities from Gmail
+        id: gmail-intake
+        continue-on-error: true
+        shell: bash
+        env:
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID || '8374c380-f148-41ab-a77f-eb35de20f2db' }}
+        run: |
+          set -euo pipefail
+          python scripts/gmail_job_intake.py
+
       - name: Execute autonomous discovery → processing → finalization loop
         id: cycle
         shell: bash
@@ -116,8 +130,9 @@ jobs:
             echo
             echo "Trigger: ${{ github.event_name }}"
             echo "Commit: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}"
+            echo "Gmail intake outcome: ${{ steps.gmail-intake.outcome }}"
             echo "Controller outcome: ${{ steps.cycle.outcome }}"
-            for report in .career-os/autonomous-cycle-report.json .career-os/public-job-api-report.json .career-os/notion-worker-report.json .career-os/resume-finalize-report.json .career-os/native-smoke-result.json; do
+            for report in .career-os/gmail-intake-report.json .career-os/autonomous-cycle-report.json .career-os/public-job-api-report.json .career-os/notion-worker-report.json .career-os/resume-finalize-report.json .career-os/native-smoke-result.json; do
               if [[ -f "$report" ]]; then
                 echo "### $(basename "$report")"
                 echo '```json'
@@ -133,6 +148,7 @@ jobs:
         with:
           name: career-os-cycle-reports
           path: |
+            .career-os/gmail-intake-report.json
             .career-os/autonomous-cycle-report.json
             .career-os/native-smoke-result.json
             .career-os/notion-worker-report.json
