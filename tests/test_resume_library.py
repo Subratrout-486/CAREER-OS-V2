@@ -1,4 +1,4 @@
-from career_os.resume_library import build_resume_library_properties, next_version
+from career_os.resume_library import build_resume_library_properties, bounded_filename, next_version
 
 
 def test_resume_library_properties_include_tailored_file_and_job_relation():
@@ -21,6 +21,18 @@ def test_resume_library_properties_include_tailored_file_and_job_relation():
     assert properties["Job"]["relation"][0]["id"] == "11111111-2222-3333-4444-555555555555"
     assert properties["File"]["files"][0]["type"] == "file_upload"
     assert properties["File"]["files"][0]["file_upload"]["id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+
+def test_long_file_display_name_is_bounded_and_keeps_extension():
+    filename = "Subrat_Rout_Field_Based_Business_Development_Representative_Mandarin_Speaking_Greater_London_North_East_England.pdf"
+    bounded = bounded_filename(filename)
+    assert len(bounded) <= 100
+    assert bounded.endswith(".pdf")
+    assert bounded == filename[: 100 - len(".pdf")] + ".pdf"
+
+
+def test_short_file_display_name_is_unchanged():
+    assert bounded_filename("resume.pdf") == "resume.pdf"
 
 
 def test_next_version_ignores_non_numeric_versions_and_increments_highest():
