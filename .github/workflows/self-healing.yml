@@ -144,6 +144,7 @@ jobs:
         if: steps.baseline.outcome == 'failure' && steps.verify.outcome == 'success'
         run: |
           set -euo pipefail
+          # Only source/test/workflow changes are eligible to leave the repair runner.
           rm -rf .gemini gemini-artifacts
           git add -A
           git reset -- .career-os 2>/dev/null || true
