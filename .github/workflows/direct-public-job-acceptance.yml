@@ -2,6 +2,8 @@ name: Direct Public Job Acceptance
 
 on:
   workflow_dispatch:
+  push:
+    branches: [feat/direct-public-job-ready-pipeline]
   schedule:
     - cron: "37 * * * *"
 
