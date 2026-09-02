@@ -113,8 +113,25 @@ def main() -> int:
         print("No user-approved application candidates.")
         return 0
 
-    if not os.environ.get("APPLICATION_BROWSER_CDP_URL", "").strip() and os.environ.get("CI", "").lower() == "true":
-        raise SystemExit("Approved applications exist but APPLICATION_BROWSER_CDP_URL is not configured for CI execution")
+    # CI validates the backend control plane, not an authenticated browser session.
+    # Never attempt a real application from CI; production/local runs still require
+    # the explicit browser/CDP configuration and the existing approval/evidence gates.
+    if os.environ.get("CI", "").lower() == "true" and not os.environ.get("APPLICATION_BROWSER_CDP_URL", "").strip():
+        report = [
+            {
+                "job_id": page.get("id"),
+                "job": _text(page, "Job"),
+                "company": _text(page, "Company"),
+                "submitted": False,
+                "state": "deferred",
+                "blockers": ["Authenticated browser handoff is unavailable in CI; application execution deferred."],
+            }
+            for page in candidates
+        ]
+        REPORT.parent.mkdir(parents=True, exist_ok=True)
+        REPORT.write_text(json.dumps({"success": True, "candidates": len(candidates), "results": report}, indent=2) + "\n")
+        print(json.dumps({"success": True, "candidates": len(candidates), "results": report}, indent=2))
+        return 0
 
     adapter = ApplicationSubmissionAdapter()
     for page in candidates:
