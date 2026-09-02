@@ -144,7 +144,6 @@ jobs:
         if: steps.baseline.outcome == 'failure' && steps.verify.outcome == 'success'
         run: |
           set -euo pipefail
-          # Only source/test/workflow changes are eligible to leave the repair runner.
           rm -rf .gemini gemini-artifacts
           git add -A
           git reset -- .career-os 2>/dev/null || true
@@ -199,4 +198,17 @@ jobs:
             echo "Baseline: ${{ steps.baseline.outcome }}"
             echo "Gemini: ${{ steps.gemini_repair.outcome }}"
             echo "Verification: ${{ steps.verify.outcome }}"
+            echo "Patch: ${{ steps.patch.outcome }}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail closed on unsuccessful repair verification
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ steps.baseline.outcome }}" == "failure" ]]; then
+            if [[ "${{ steps.verify.outcome }}" != "success" || "${{ steps.patch.outcome }}" != "success" ]]; then
+              echo "Autonomous repair did not produce a verified repair; failing the workflow intentionally."
+              exit 1
+            fi
+          fi
