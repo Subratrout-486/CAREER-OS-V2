@@ -7,13 +7,16 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 from scripts import notion_job_worker
 from career_os.candidate_profile import load_candidate_source_of_truth
 from career_os.resume_artifact import resume_filename
 from career_os.application.submission_adapter import ApplicationSubmissionAdapter
 
-ROOT = Path(__file__).resolve().parents[1]
 JOBS_DS = os.environ.get("NOTION_JOBS_DATA_SOURCE_ID", "8374c380-f148-41ab-a77f-eb35de20f2db")
 APPLICATIONS_DS = os.environ.get("NOTION_APPLICATIONS_DATA_SOURCE_ID", "2a4c9821-f380-4a3d-a329-b8dcff959935")
 REPORT = ROOT / ".career-os" / "application-worker-report.json"
