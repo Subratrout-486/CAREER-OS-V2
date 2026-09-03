@@ -10,7 +10,8 @@ from typing import Any
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+SRC = ROOT / "src"
+sys.path[:0] = [str(ROOT), str(SRC)]
 
 from scripts import notion_job_worker
 from career_os.candidate_profile import load_candidate_source_of_truth
