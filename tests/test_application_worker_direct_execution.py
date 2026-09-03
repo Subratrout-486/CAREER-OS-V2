@@ -12,6 +12,7 @@ WORKER = ROOT / "scripts" / "notion_application_worker.py"
 def test_application_worker_direct_execution_resolves_scripts_package():
     env = os.environ.copy()
     env.pop("NOTION_TOKEN", None)
+    env.pop("PYTHONPATH", None)
     result = subprocess.run(
         [sys.executable, str(WORKER)],
         cwd=ROOT,
