@@ -21,5 +21,7 @@ def test_application_worker_direct_execution_resolves_scripts_package():
         check=False,
     )
 
+    assert result.returncode != 0
+    assert "NOTION_TOKEN is not configured" in result.stderr
     assert "ModuleNotFoundError: No module named 'scripts'" not in result.stderr
     assert "ModuleNotFoundError: No module named 'career_os'" not in result.stderr
