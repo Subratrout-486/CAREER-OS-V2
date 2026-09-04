@@ -99,13 +99,35 @@ def test_discovery_source_failure_isolated(tmp_path):
     svc = JobDiscoveryService()
     result = svc.ingest(
         [
-            DiscoveryItem("broken", {"title": None, "company": None, "url": None}),  # invalid intake
+            DiscoveryItem(
+                "broken", {"title": None, "company": None, "url": None}
+            ),  # invalid intake
             DiscoveryItem("greenhouse", _raw_job(external_id="9")),
         ]
     )
     # The good job still lands even though one source errored.
     assert len(result.unique_jobs) >= 1
     assert "broken" in result.source_errors
+
+
+def test_discovery_string_posted_at_is_not_dropped(tmp_path):
+    # Regression: real ATS adapters (Greenhouse/Lever/Ashby) surface posted_at as
+    # an ISO string, not a datetime. This must normalize, not be swallowed.
+    job = RawATSJob(
+        provider="lever",
+        external_id="L-1",
+        company="Acme",
+        title="Support Engineer",
+        location="India",
+        description="Support Engineer with SQL and communication skills.",
+        job_url="https://jobs.lever.co/acme/L-1",
+        posted_at="2026-08-01T09:00:00Z",
+        raw={},
+    )
+    result = JobDiscoveryService().ingest([DiscoveryItem("lever", job)])
+    assert len(result.unique_jobs) == 1
+    assert result.source_errors == {}
+    assert result.jobs[0].record.posted_at is not None
 
 
 def test_scrapling_fixture():
@@ -156,7 +178,10 @@ def test_end_to_end_approved_executes_and_verifies(tmp_path):
             url=execution.application_url,
             profile=execution.pipeline.get("profile", {}),
             fields=[],
-            steps=[Step(kind="open", target=execution.application_url), Step(kind="verify", target=execution.application_url)],
+            steps=[
+                Step(kind="open", target=execution.application_url),
+                Step(kind="verify", target=execution.application_url),
+            ],
             fixture_pages={
                 "open": "<html><title>Apply</title><body>form</body></html>",
                 "verify": "<html><title>Thanks</title><body>Your application has been submitted. Reference APP-42</body></html>",

@@ -60,6 +60,15 @@ class DiscoveryItem:
     source: str
     raw: Any
 
+    @staticmethod
+    def _posted_iso(value: Any) -> str | None:
+        """Return an ISO-8601 string for a datetime or pre-formatted str."""
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return str(value)
+
     def to_intake(self) -> dict[str, Any]:
         if isinstance(self.raw, RawATSJob):
             return {
@@ -70,7 +79,7 @@ class DiscoveryItem:
                 "url": self.raw.job_url,
                 "source": self.raw.provider,
                 "external_id": self.raw.external_id,
-                "posted_at": self.raw.posted_at.isoformat() if self.raw.posted_at else None,
+                "posted_at": self._posted_iso(self.raw.posted_at),
             }
         if isinstance(self.raw, PublicJob):
             full = {
@@ -81,7 +90,7 @@ class DiscoveryItem:
                 "url": self.raw.job_url,
                 "source": self.raw.provider,
                 "external_id": self.raw.external_id,
-                "posted_at": self.raw.posted_at.isoformat() if self.raw.posted_at else None,
+                "posted_at": self._posted_iso(self.raw.posted_at),
                 "remote": self.raw.remote,
                 "salary_min": self.raw.salary_min,
                 "salary_max": self.raw.salary_max,
