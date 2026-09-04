@@ -93,8 +93,8 @@ class EndToEndOrchestrator:
                 ledger = self.evidence_analyzer.build_ledger(list(self.claims))
                 fit = self.fit_scorer.score(jd, ledger)
                 tailored = self.resume_tailor.tailor(self.resume, jd, ledger)
-                self.ats_auditor.audit(tailored, jd)
-                self.recruiter_reviewer.review(jd, tailored, fit, ledger)
+                ats = self.ats_auditor.audit(tailored, jd)
+                review = self.recruiter_reviewer.review(jd, tailored, fit, ledger)
                 execution = ApplicationExecution(
                     job_key=str(job.record.job_id),
                     company=job.record.company,
@@ -107,9 +107,30 @@ class EndToEndOrchestrator:
                                 {"text": b.text, "evidence_claim_ids": list(b.evidence_claim_ids)}
                                 for b in tailored.bullets
                             ],
+                            "matched_keywords": list(tailored.matched_keywords),
                         },
                         "fields": [],
                         "fit": fit.to_dict(),
+                        "jd": jd.to_dict(),
+                        "evidence": [
+                            {
+                                "claim_id": c.claim_id,
+                                "claim": c.claim,
+                                "kind": c.kind.value,
+                                "support": c.support.value,
+                                "confidence": c.confidence,
+                                "source": {
+                                    "source_id": c.source.source_id,
+                                    "source_type": c.source.source_type,
+                                    "label": c.source.label,
+                                }
+                                if c.source
+                                else None,
+                            }
+                            for c in ledger.claims
+                        ],
+                        "ats_audit": ats.to_dict(),
+                        "recruiter_review": review.to_dict(),
                         "jd_quality": jd.analysis_quality,
                     },
                 )
@@ -126,7 +147,7 @@ class EndToEndOrchestrator:
         *,
         plan_builder: Callable[[ApplicationExecution], ApplicationPlan] | None = None,
     ) -> BatchOutcome:
-        """Approve, queue and autonomously execute a batch.""" 
+        """Approve, queue and autonomously execute a batch."""
         if self._store is None:
             raise RuntimeError("run_approved requires an ExecutionStore")
         machine = ApplicationExecutionStateMachine(self._store)
