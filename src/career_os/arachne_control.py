@@ -45,6 +45,10 @@ def _default_execution_root() -> Path:
     return Path(os.getenv("CAREER_OS_EXECUTION_ROOT", ".career_os/executions"))
 
 
+def _default_arachne_root() -> Path:
+    return Path(os.getenv("CAREER_OS_ARACHNE_ROOT", ".career_os/arachne"))
+
+
 def _execution_payload(execution: ApplicationExecution) -> dict[str, Any]:
     """Serialize one application execution with all pipeline artifacts for the UI."""
     pipeline = execution.pipeline or {}
@@ -92,7 +96,7 @@ def create_arachne_control_router(
     which contacts live feeds only when ``/api/discover`` is called.
     """
     exec_store = execution_store or ExecutionStore(_default_execution_root())
-    res_store = result_store or ArachneResultStore()
+    res_store = result_store or ArachneResultStore(_default_arachne_root())
     provider_router = router or ModelRouter()
     dashboard_service = dashboard or DashboardService(store=exec_store, router=provider_router)
     candidate = candidate_path or Path("candidate/source_of_truth.json")

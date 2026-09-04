@@ -1,14 +1,18 @@
 """Direct HTTP boundary for the Arachne frontend."""
+
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Callable
+import os
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from career_os.automation.job_processor import AutomaticJobProcessor, JobProcessingRequest
 from career_os.arachne_store import ArachneResultStore
+from career_os.automation.job_processor import AutomaticJobProcessor, JobProcessingRequest
 from career_os.conductor_bridge import IdempotencyStore, authorize, result_to_dict
 
 
@@ -30,19 +34,28 @@ def create_arachne_router(
     """
     router = APIRouter(prefix="/api/v1", tags=["arachne"])
     guard = idempotency_store or IdempotencyStore()
-    result_store = store or ArachneResultStore()
+    result_store = store or ArachneResultStore(
+        Path(os.getenv("CAREER_OS_ARACHNE_ROOT", ".career_os/arachne"))
+    )
     make_processor = processor_factory or AutomaticJobProcessor
 
     def auth(token: str | None) -> None:
         try:
             authorize(token)
         except PermissionError as exc:
-            raise HTTPException(status_code=401, detail="CareerOS API authorization required") from exc
+            raise HTTPException(
+                status_code=401, detail="CareerOS API authorization required"
+            ) from exc
 
     @router.get("/health")
     def health(x_career_os_token: str | None = Header(default=None)) -> dict[str, Any]:
         auth(x_career_os_token)
-        return {"status": "ok", "service": "career-os-v2", "client": "arachne", "submission_enabled": False}
+        return {
+            "status": "ok",
+            "service": "career-os-v2",
+            "client": "arachne",
+            "submission_enabled": False,
+        }
 
     @router.get("/jobs")
     def jobs(x_career_os_token: str | None = Header(default=None)) -> dict[str, Any]:
@@ -76,7 +89,15 @@ def create_arachne_router(
             result_store.record(result.job.canonical_key, trace_id, serialized)
         except Exception as exc:
             guard.release(payload.idempotency_key)
-            raise HTTPException(status_code=502, detail={"trace_id": trace_id, "error": "CareerOS processing failed"}) from exc
-        return {"trace_id": trace_id, "processing": "automatic", "submission_enabled": False, "result": serialized}
+            raise HTTPException(
+                status_code=502,
+                detail={"trace_id": trace_id, "error": "CareerOS processing failed"},
+            ) from exc
+        return {
+            "trace_id": trace_id,
+            "processing": "automatic",
+            "submission_enabled": False,
+            "result": serialized,
+        }
 
     return router
