@@ -13,14 +13,12 @@ auto-submits; it only authorizes the existing approval-gated execution engine.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
 from career_os.arachne_store import ArachneResultStore
-from career_os.automation.job_processor import AutomaticJobProcessor
 from career_os.candidate_profile import load_candidate_source_of_truth
 from career_os.dashboard.service import DashboardService
 from career_os.execution.state import (
@@ -82,12 +80,16 @@ def create_arachne_control_router(
     dashboard: DashboardService | None = None,
     router: ModelRouter | None = None,
     candidate_path: Path | None = None,
-    provider_factory: Callable[[], AutomaticJobProcessor] | None = None,
+    ats_discovery: Any | None = None,
 ) -> APIRouter:
     """Create the live ARACHNE control-plane router.
 
     Dependencies default to production state paths; tests can inject isolated
     stores so no project state is touched.
+
+    ``ats_discovery`` is an ``ATSDiscoveryService`` used to scan a public careers
+    URL through the registered ATS providers. It defaults to the real service
+    which contacts live feeds only when ``/api/discover`` is called.
     """
     exec_store = execution_store or ExecutionStore(_default_execution_root())
     res_store = result_store or ArachneResultStore()
@@ -336,6 +338,75 @@ def create_arachne_control_router(
         return {
             "prepared": len(prepared),
             "first_execution_id": prepared[0].execution_id if prepared else None,
+        }
+
+    # ---------------------------------------------------------------- real ATS discovery
+    @control.post("/discover")
+    def discover(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Scan a public ATS careers URL and prepare ready-for-approval executions.
+
+        Resolves the URL through the registered credential-free ATS providers
+        (Greenhouse, Lever, Ashby, Workday, Rippling, SmartRecruiters, Teamtailor),
+        normalizes/deduplicates the returned jobs, and pushes accepted jobs through
+        the full analytic pipeline into READY_FOR_APPROVAL.
+
+        Failures are never reported as success: an unrecognized careers URL or a
+        provider unreachable at scan time is returned as an explicit blocked /
+        degraded state with per-source errors.
+        """
+        from career_os.discovery.service import DiscoveryItem, JobDiscoveryService
+        from career_os.integrations.ats_discovery import ATSDiscoveryService
+
+        payload = payload or {}
+        careers_url = str(payload.get("careers_url", "")).strip()
+        if not careers_url:
+            raise HTTPException(status_code=400, detail="careers_url is required")
+        try:
+            max_jobs = max(1, min(int(payload.get("max_jobs", 50) or 50), 200))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="max_jobs must be an integer") from exc
+
+        scanner = ats_discovery or ATSDiscoveryService()
+        result = scanner.scan(careers_url, max_jobs=max_jobs)
+
+        if result.provider is None:
+            return {
+                "provider": None,
+                "status": "unsupported",
+                "blocked": True,
+                "reason": "No supported ATS provider detected for the provided careers URL",
+                "careers_url": careers_url,
+                "jobs_scanned": 0,
+                "unique_jobs": 0,
+                "duplicates": 0,
+                "source_errors": {},
+                "prepared": 0,
+                "execution_ids": [],
+            }
+
+        resume, claims = _candidate_resume_and_claims(candidate)
+        orchestrator = EndToEndOrchestrator(
+            store=exec_store,
+            resume=resume,
+            claims=claims,
+        )
+        items = [DiscoveryItem(result.provider, job) for job in result.jobs]
+        discovered = JobDiscoveryService().ingest(items)
+        prepared = orchestrator.prepare(discovered) if discovered.unique_jobs else []
+        return {
+            "provider": result.provider,
+            "status": "ok" if prepared else "degraded",
+            "blocked": not prepared,
+            "reason": None
+            if prepared
+            else "ATS provider returned no acceptable jobs (rate-limited, empty, or all duplicates)",
+            "careers_url": careers_url,
+            "jobs_scanned": len(result.jobs),
+            "unique_jobs": len(discovered.unique_jobs),
+            "duplicates": len(discovered.jobs) - len(discovered.unique_jobs),
+            "source_errors": discovered.source_errors,
+            "prepared": len(prepared),
+            "execution_ids": [e.execution_id for e in prepared],
         }
 
     # ---------------------------------------------------------------- interview / learning
