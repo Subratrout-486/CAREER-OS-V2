@@ -1,0 +1,30 @@
+# Render blueprint for ARACHNE · Career OS Control Plane
+#
+# One-click deploy: push to GitHub, then on Render create a "Blueprint"
+# from this file, or click "New + → Blueprint" and point it at this repo.
+#
+# The disk `career-os-data` is mounted at /data so the execution store and
+# ARACHNE index survive restarts and redeploys.
+
+services:
+  - type: web
+    name: career-os-v2
+    runtime: docker
+    repo: https://github.com/Subratrout-486/CAREER-OS-V2
+    plan: starter
+    dockerContext: .
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /healthz
+    envVars:
+      - key: CAREER_OS_ENV
+        value: production
+      - key: CAREER_OS_EXECUTION_ROOT
+        value: /data/.career_os/executions
+      - key: CAREER_OS_ARACHNE_ROOT
+        value: /data/.career_os/arachne
+      - key: CAREER_OS_ENABLE_BROWSER
+        sync: false
+    disk:
+      name: career-os-data
+      mountPath: /data
+      sizeGB: 1
