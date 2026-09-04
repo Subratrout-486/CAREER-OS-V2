@@ -749,7 +749,7 @@ function actionsHTML(j){
 }
 async function approveAndRefresh(){
   if(!globalJob) return;
-  try{ await api("/api/jobs/"+globalJob.execution_id+"/approve",{method:"POST"}); toast("Approved — now QUEUED/executing"); openJob(globalJob.execution_id); loadOverview(); loadApproval(); loadExecution(); }
+  try{ await api("/api/jobs/"+globalJob.execution_id+"/approve",{method:"POST"}); toast("Approved — authorized for the approval-gated execution engine"); openJob(globalJob.execution_id); loadOverview(); loadApproval(); loadExecution(); }
   catch(e){ toast("Approve failed: "+e.message, true); }
 }
 async function withdrawJob(){
