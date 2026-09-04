@@ -26,4 +26,44 @@
 </section></div>
 <section class="card wide"><div class="section-title">Current execution pipeline <span class="pill">pass 2 / 2</span></div><div class="timeline"><div class="stage complete"><b>Discovery</b><small>complete</small></div><div class="stage complete"><b>JD intelligence</b><small>complete</small></div><div class="stage complete"><b>Evidence</b><small>complete</small></div><div class="stage complete"><b>Fit</b><small>complete</small></div><div class="stage complete"><b>Resume + ATS</b><small>complete</small></div><div class="stage blocked"><b>Submit</b><small>approval required</small></div></div></section>
 <section class="card wide"><div class="section-title">System health <span class="pill">provider-neutral</span></div><div class="label">Autonomous cycle capacity</div><div class="bar"><div class="fill"></div></div><div class="meta" style="margin-top:10px">Discovery → processing → finalization → smoke verification. Provider outages are recorded as blocked state rather than false success.</div></section>
+<script>
+(async function () {
+  const fmt = Intl.NumberFormat("en", {maximumFractionDigits: 0});
+  const setMetric = (n, key) => {
+    const el = document.querySelectorAll(".grid .card .metric")[n];
+    if (el && key != null) el.textContent = key;
+  };
+  try {
+    const dash = await (await fetch("/api/v1/state/dashboard")).json();
+    const t = dash.totals || {};
+    setMetric(0, fmt.format(t.jobs_discovered ?? t.discovered ?? 0));
+    setMetric(1, fmt.format(t.high_fit_roles ?? t.awaiting_approval ?? 0));
+    setMetric(2, fmt.format(t.awaiting_approval ?? t.submission_verified ?? 0));
+    const health = dash.pipeline_health;
+    setMetric(3, health != null ? fmt.format(health) + "%" : "—");
+    const fill = document.querySelector(".bar .fill");
+    if (fill && health != null) fill.style.width = Math.max(0, Math.min(100, health)) + "%";
+  } catch (e) { /* keep static placeholder when API is unreachable */ }
+
+  try {
+    const execs = await (await fetch("/api/v1/state/executions")).json();
+    const queue = document.querySelector(".layout section .section-title");
+    const rows = execs.executions || [];
+    if (queue && rows.length) {
+      const container = document.querySelector(".layout section");
+      container.querySelectorAll(".row").forEach(r => r.remove());
+      rows.slice(0, 8).forEach(e => {
+        const row = document.createElement("div");
+        row.className = "row";
+        const fit = ((e && e.fit && typeof e.fit.overall === "number") ? e.fit.overall : null);
+        row.innerHTML = "<div><div class='job'></div><div class='meta'></div></div><div class='score'></div>";
+        row.querySelector(".job").textContent = (e.title ? e.title + " · " : "") + (e.company || "");
+        row.querySelector(".meta").textContent = e.status || e.application_url || "";
+        row.querySelector(".score").textContent = fit != null ? fmt.format(fit) + " fit" : (e.status || "");
+        container.appendChild(row);
+      });
+    }
+  } catch (e) { /* keep static priority queue when API is unreachable */ }
+})();
+</script>
 </main></body></html>
