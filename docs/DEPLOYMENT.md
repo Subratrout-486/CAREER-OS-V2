@@ -52,16 +52,79 @@ Open `http://localhost:8000/` in a browser.
 
 ---
 
+## 2b. Production deployment (making ARACHNE public)
+
+The repository ships a containerised, single-process deploy ready for any host
+that runs containers (Render, Railway, Fly.io, a VPS with Docker, etc.). No
+second frontend is added; `career_os.http_app:app` serves the ARACHNE SPA at
+`/` and the `/api` control plane.
+
+### Container (recommended)
+
+```bash
+docker build -t career-os-v2 .
+docker run -d --name career-os-v2 \
+  -p 8000:8000 \
+  -v career_os_data:/data \
+  career-os-v2
+# open http://127.0.0.1:8000/
+```
+
+The image runs `uvicorn career_os.http_app:app` on `0.0.0.0:8000`, runs as a
+non-root user, and mounts persistent state under `/data` (execution store,
+ARACHNE index). A `HEALTHCHECK` probes `/healthz` every 30s.
+
+### Render blueprint (one-click)
+
+`render.yaml` is a Render Blueprint: a web service (Docker) that mounts a
+1 GB persistent disk at `/data` and health-checks `/healthz`. To launch:
+
+1. Push this repo to GitHub.
+2. On render.com, click **New + → Blueprint** (or **New + → Web Service** and
+   point it at the repo, runtime *Docker*).
+3. Render builds the `Dockerfile`. The service becomes public at
+   `https://career-os-v2.onrender.com/`.
+4. Optionally set `CAREER_OS_ENABLE_BROWSER` only if the image includes
+   Playwright/Chromium and you intend live application execution (see §6).
+
+Equivalent one-command deploys on other hosts:
+- **Railway:** New Project → Deploy from GitHub → default start command
+  already resolves from `Procfile` / `CMD`.
+- **Fly.io:** `fly launch` then `fly deploy`.
+
+### Health checks
+
+- `GET /healthz` — token-free liveness/readiness. Returns `{"status":"ok",...}`
+  only when the persistent state roots exist and are writable, otherwise a
+  `degraded` report listing the failing mounts. This is the probe host
+  providers and the Docker `HEALTHCHECK` use.
+- `GET /api/v1/health` — token-gated service health (requires
+  `CAREER_OS_CONDUCTOR_TOKEN` header when that env is set).
+- `GET /api/providers` — provider/agent availability matrix (tokenless).
+
+### What a deployer must provide
+
+- A hosting account (e.g. Render/Railway/Fly) and a way to authenticate from
+  this environment (or push to a private/public GitHub the host builds from).
+- A public/private repo the host can build from — this repo is already
+  pushed to `https://github.com/Subratrout-486/CAREER-OS-V2`.
+- Optional secrets only if you enable live browsing (`CAREER_OS_ENABLE_BROWSER`
+  + Playwright image) or optional provider enrichment (Ollama/JobPilot/Gmail/
+  Notion). The app is fully operational tokenless and offline.
+
+---
+
 ## 3. Environment variables
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `CAREER_OS_EXECUTION_ROOT` | `.career_os/executions` | Execution store root (durable approval + execution state) |
+| `CAREER_OS_ARACHNE_ROOT` | `.career_os/arachne` | Processed-job index (ARACHNE read/API + control plane) |
 | `CAREER_OS_CONDUCTOR_CHECKPOINT_PATH` | `.career_os/conductor_runs` | Conductor pipeline checkpoints |
 | `CAREER_OS_CONDUCTOR_IDEMPOTENCY_PATH` | `.career_os/conductor_idempotency.json` | Conductor idempotency ledger |
 | `CAREER_OS_OLLAMA_URL` | `http://localhost:11434` | Local Ollama model endpoint (optional enrichment) |
 | `CAREER_OS_ENABLE_BROWSER` | (unset ⇒ off) | `1`/`true` to enable live browser execution (Playwright). Off ⇒ safe deterministic fixture driver. |
-| `CAREER_OS_TOKEN` | (unset) | Bearer token required by the `/api/v1` read API + state API when set |
+| `CAREER_OS_CONDUCTOR_TOKEN` | (unset) | Bearer token required by the `/api/v1` read API + state API when set (HMAC-compared; header `X-Career-OS-Token`) |
 | `CAREER_OS_ENV` | (unset) | `production`/`sandbox` operational label |
 | `JOBPILOT_API`, `JOBPILOT_API_TOKEN`, `JOBPILOT_TERMINAL_URL`, `JOBPILOT_PROVIDER`, `JOBPILOT_TIMEOUT_SECONDS`, `JOBPILOT_POLL_SECONDS` | (unset) | Optional delegated browser-execution via the user's JobPilot terminal (mutually exclusive with native Playwright: see §6) |
 | `GEMINI_MODEL` | `gemini-3.6-flash` | Self-healing CI repair model (CI only) |
@@ -112,9 +175,11 @@ atomic writes (temp file + rename). Default paths (override via env):
 | Candidate source of truth | `candidate/source_of_truth.json` | ✅ (committed) |
 | Tailored PDF resumes | `.career-os/resume/*.pdf` (scripts) | ✅ |
 
-In production, mount a persistent volume at the working directory (or set the
-`CAREER_OS_*` paths) so `.career_os/` and `.career-os/` survive container
-recreation. `ssd` or persistent disks recommended; these are small JSON files.
+In production, mount a persistent volume so `.career_os/` and `.career-os/`
+survive container recreation. The bundled Dockerfile and `render.yaml`
+blueprint mount a volume at `/data` and set `CAREER_OS_EXECUTION_ROOT` and
+`CAREER_OS_ARACHNE_ROOT` under it; `/healthz` verifies those roots are mounted
+and writable. `ssd` or persistent disks recommended; these are small JSON files.
 
 ---
 
@@ -166,8 +231,11 @@ paths; the native engine + Playwright driver is the primary path.
 
 ## 7. Health, startup checks & failure recovery
 
-- **Health endpoint:** `GET /api/v1/health` (requires `CAREER_OS_TOKEN` if set).
-  Returns `{"status":"ok","service":"career-os-v2","submission_enabled":false}`.
+- **Health endpoint:** `GET /healthz` (token-free liveness/readiness; verifies
+  the persistent state roots are mounted and writable). Returns
+  `{"status":"ok","service":"career-os-v2","ready":true}`.
+- **Service health:** `GET /api/v1/health` (requires `CAREER_OS_CONDUCTOR_TOKEN`
+  if set). Returns `{"status":"ok","service":"career-os-v2","submission_enabled":false}`.
 - **Provider health:** `GET /api/providers` reports each adapter's availability.
 - **Recovery:** every externally visible transition is written atomically
   (`tempfile` + `os.replace`), so a crash mid-write cannot corrupt state. On
