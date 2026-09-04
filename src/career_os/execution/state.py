@@ -50,6 +50,8 @@ class ExecutionStatus(str):
     SUBMISSION_VERIFIED = "SUBMISSION_VERIFIED"
     APPLICATION_FAILED = "APPLICATION_FAILED"
     BLOCKED_SECURITY_CHALLENGE = "BLOCKED_SECURITY_CHALLENGE"
+    AUTH_REQUIRED = "AUTH_REQUIRED"
+    UNSUPPORTED = "UNSUPPORTED"
     NEEDS_REVIEW = "NEEDS_REVIEW"
     WITHDRAWN = "WITHDRAWN"
 
@@ -242,6 +244,34 @@ class ApplicationExecutionStateMachine:
         execution.record(
             ExecutionStatus.BLOCKED_SECURITY_CHALLENGE,
             detail="Security challenge detected; application paused for human review",
+        )
+        return execution
+
+    def auth_required(self, execution: ApplicationExecution, detail: str) -> ApplicationExecution:
+        """Record that the application flow requires human authentication.
+
+        Distinct from NEEDS_REVIEW: this is a specific, actionable blocker where
+        the candidate must sign in / authorize before auto-apply can continue.
+        Never bypassed; surfaced to the user as AUTH_REQUIRED.
+        """
+        execution.execution["auth_required"] = detail
+        execution.record(
+            ExecutionStatus.AUTH_REQUIRED,
+            detail=detail or "Authentication required to continue application",
+        )
+        return execution
+
+    def unsupported(self, execution: ApplicationExecution, detail: str) -> ApplicationExecution:
+        """Record that no supported auto-apply flow maps to this application.
+
+        A genuine product state: the application portal / URL is recognized as
+        one the adapter does not yet drive autonomously, so the job goes back to
+        the human rather than being guessed at or force-submitted.
+        """
+        execution.execution["unsupported"] = detail
+        execution.record(
+            ExecutionStatus.UNSUPPORTED,
+            detail=detail or "No supported auto-apply flow for this application",
         )
         return execution
 

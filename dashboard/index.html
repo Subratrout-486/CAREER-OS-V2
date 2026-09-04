@@ -77,7 +77,18 @@ a:hover{color:var(--accent2)}
 .stage .node.wait{animation:glow 1.6s infinite}
 @keyframes glow{0%,100%{box-shadow:0 0 10px rgba(242,163,60,.4)}50%{box-shadow:0 0 22px rgba(242,163,60,.75)}}
 .pipe-line{width:16px;height:2px;background:var(--line2);border-radius:2px}
-.pipe-line.done{background:var(--ok2)}
+.pipe-line.done{background:var(--ok2);position:relative;overflow:hidden}
+.pipe-line.done:after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);transform:translateX(-100%);animation:wire 2.2s ease infinite}
+@keyframes wire{0%{transform:translateX(-100%)}60%,100%{transform:translateX(100%)}}
+.web-line{transition:stroke .5s ease,stroke-width .25s ease}
+.pulse-ring{transform-origin:center;animation:pulse-ring 2.6s ease-out infinite}
+@keyframes pulse-ring{0%{transform:scale(.6);opacity:.9}70%,100%{transform:scale(1.6);opacity:0}}
+.shimmer{background:linear-gradient(90deg,var(--panel2) 25%,var(--line) 50%,var(--panel2) 75%);background-size:200% 100%;animation:shimmer 1.4s infinite}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@media (prefers-reduced-motion: reduce){
+  .pipe-line.done:after,.pulse-ring,.stage.active .node,.stage .node.wait,.live-chip .dot,.shimmer{animation:none!important}
+  .view{animation:none}
+}
 /* ---------- job / list rows ---------- */
 .list{display:flex;flex-direction:column}
 .job-row{display:flex;align-items:center;gap:14px;padding:14px 14px;border-top:1px solid var(--line);cursor:pointer;transition:background .12s;border-radius:8px}
@@ -93,6 +104,7 @@ a:hover{color:var(--accent2)}
 .pill.danger{color:var(--danger);border-color:rgba(255,107,122,.35);background:rgba(255,107,122,.08)}
 .pill.info{color:var(--info);border-color:rgba(90,167,255,.35);background:rgba(90,167,255,.08)}
 .pill.gold{color:var(--accent2);border-color:rgba(242,163,60,.4);background:rgba(242,163,60,.08)}
+.pill.muted{color:var(--muted);border-color:rgba(148,163,184,.35);background:rgba(148,163,184,.08)}
 .score{font-size:15px;font-weight:800;min-width:54px;text-align:right}
 /* ---------- buttons ---------- */
 .btn{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line2);background:var(--panel2);color:var(--text);padding:9px 16px;border-radius:10px;font-weight:650;font-size:13px;cursor:pointer;transition:all .15s;font-family:var(--sans)}
@@ -162,6 +174,7 @@ a:hover{color:var(--accent2)}
 ::-webkit-scrollbar-thumb{background:#26324a;border-radius:8px}
 ::-webkit-scrollbar-track{background:transparent}
 @media(max-width:1100px){.grid.k4{grid-template-columns:repeat(2,1fr)}.grid.k3,.grid.k2{grid-template-columns:1fr}.app{grid-template-columns:64px 1fr}.nav-item span{display:none}.brand-name,.brand-tag,.nav-group,.side-foot{display:none}.nav-group{display:none}}
+@media(max-width:720px){.grid.k4,.grid.k2{grid-template-columns:1fr}.main{padding:16px 12px 60px}.view-title{font-size:21px}.view-head{flex-direction:column;align-items:flex-start}.graph-wrap{height:420px}}
 </style>
 </head>
 <body>
@@ -321,6 +334,8 @@ const STATUS = {
   SUBMISSION_VERIFIED:{label:"Verified",cls:"ok"},
   APPLICATION_FAILED:{label:"Failed",cls:"danger"},
   BLOCKED_SECURITY_CHALLENGE:{label:"Blocked",cls:"danger"},
+  AUTH_REQUIRED:{label:"Auth Required",cls:"warn"},
+  UNSUPPORTED:{label:"Unsupported",cls:"muted"},
   NEEDS_REVIEW:{label:"Needs Review",cls:"warn"},
   WITHDRAWN:{label:"Withdrawn",cls:""},
   DISCOVERED:{label:"Discovered",cls:""},
@@ -395,7 +410,9 @@ async function loadOverview(){
   const ph = d.provider_health||{};
   el("ovProviders").innerHTML = Object.entries(ph).map(([name,info])=>{
     const ok = info && info.available;
-    return `<div class="prov"><div><div class="p-name">${esc(name)}</div><div class="p-cap">${esc(name)} provider adapter</div></div><div class="state"><span class="pill ${ok?'ok':'danger'}">${ok?'available':'unavailable'}</span></div></div>`;
+    const status = (info && info.status)||"NOT_CONFIGURED";
+    const cls = ok?'ok':(status==="DEGRADED"?'warn':'danger');
+    return `<div class="prov"><div><div class="p-name">${esc(name)}</div><div class="p-cap">${esc(name)} provider adapter</div></div><div class="state"><span class="pill ${cls}">${status}</span></div></div>`;
   }).join("");
   const errs = d.recent_errors||[];
   el("ovErrors").innerHTML = errs.length===0
@@ -431,7 +448,11 @@ drawBrand();
 
 /* ---------- WEB GRAPH ---------- */
 async function loadWeb(){
-  const g = await jsonOrEmpty("/api/graph"); if(!g) return;
+  const g = await jsonOrEmpty("/api/graph"); 
+  if(!g || !g.nodes || g.nodes.length===0){
+    el("web").innerHTML = `<text x="50%" y="50%" text-anchor="middle" fill="#8b98a8" font-size="14" font-family="Inter,sans-serif">The web is quiet — approve applications to weave connections.</text>`;
+    return;
+  }
   const nodes = g.nodes||[], edges = g.edges||[];
   const svg = el("web"); sgWidth = svg.clientWidth||900; sgHeight = svg.clientHeight||560;
   // force-ish radial layout: candidate center, jobs on a ring, companies/outcomes outer
@@ -547,7 +568,9 @@ async function approveJob(id, btn){
 /* ---------- EXECUTION ---------- */
 const execStages = ["READY_FOR_APPROVAL","APPROVED","QUEUED","APPLYING","SUBMITTED","SUBMISSION_VERIFIED"];
 async function loadExecution(){
+  el("execList").innerHTML = `<div class="empty"><div class="shimmer big" style="width:220px;height:20px;border-radius:6px"></div><div class="shimmer" style="width:300px;height:12px;border-radius:5px;margin-top:10px"></div></div>`;
   const d = await jsonOrEmpty("/api/executions");
+  if(!d){ el("execList").innerHTML = `<div class="empty"><div class="big">No executions</div>Discover and approve an application to see it move through the pipeline.</div>`; el("execPipeline").innerHTML = ""; return; }
   if(!d || d.executions.length===0){
     el("execList").innerHTML = `<div class="empty"><div class="big">No executions</div>Discover and approve an application to see it move through the pipeline.</div>`;
     el("execPipeline").innerHTML = "";
@@ -559,7 +582,7 @@ async function loadExecution(){
   el("execPipeline").innerHTML = order.map((s,i)=>{
     const done = i<maxIdx||d.executions.some(e=>e.status===s);
     const cur = i===maxIdx;
-    const failOpen = d.executions.some(e=>["APPLICATION_FAILED","BLOCKED_SECURITY_CHALLENGE","NEEDS_REVIEW"].includes(e.status));
+    const failOpen = d.executions.some(e=>["APPLICATION_FAILED","BLOCKED_SECURITY_CHALLENGE","AUTH_REQUIRED","UNSUPPORTED","NEEDS_REVIEW"].includes(e.status));
     const cls = i>=maxIdx && failOpen ? "fail" : (done||cur ? (cur?"active":"done") : "");
     const node = done?'✓':(i+1);
     return `<div class="stage ${cls}"><span class="node ${cur?'wait':''}">${esc(node)}</span>${STATUS[s].label}</div>`+ (i<order.length-1?`<div class="pipe-line ${done||cur?'done':''}"></div>`:"");
@@ -573,7 +596,7 @@ async function loadExecution(){
 }
 function renderExecStages(j){
   const idx = execStages.indexOf(j.status);
-  const finished = j.status==="APPLICATION_FAILED"||j.status==="BLOCKED_SECURITY_CHALLENGE"||j.status==="NEEDS_REVIEW";
+  const finished = ["APPLICATION_FAILED","BLOCKED_SECURITY_CHALLENGE","AUTH_REQUIRED","UNSUPPORTED","NEEDS_REVIEW"].includes(j.status);
   return orderHTML(j.status, idx, finished);
 }
 
@@ -639,9 +662,11 @@ async function loadProviders(){
   if(!d) return;
   el("providerList").innerHTML = Object.entries(d.health).map(([name,info])=>{
     const ok = !!info.available;
+    const status = (info&&info.status)||"NOT_CONFIGURED";
+    const cls = ok?'ok':(status==="DEGRADED"?'warn':'danger');
     return `<div class="prov"><div class="p-name" style="width:130px">${esc(name)}</div>
       <div class="p-cap">Adapter · provider-neutral routing</div>
-      <div class="state"><span class="pill ${ok?'ok':'danger'}">${ok?'available · healthy':'unavailable'}</span></div></div>`;
+      <div class="state"><span class="pill ${cls}">${esc(status)}${ok?' · healthy':''}</span></div></div>`;
   }).join("");
 }
 
@@ -671,7 +696,7 @@ let globalJob=null;
 function renderJobPipeline(j){
   const order = execStages;
   const idx = order.indexOf(j.status);
-  let finished = ["APPLICATION_FAILED","BLOCKED_SECURITY_CHALLENGE","NEEDS_REVIEW","WITHDRAWN"].includes(j.status);
+  let finished = ["APPLICATION_FAILED","BLOCKED_SECURITY_CHALLENGE","AUTH_REQUIRED","UNSUPPORTED","NEEDS_REVIEW","WITHDRAWN"].includes(j.status);
   const notStarted = idx<0 && !finished;
   el("jobPipeline").innerHTML = order.map((s,i)=>{
     const done = (idx>=0 && i<idx) || j.status==="SUBMISSION_VERIFIED";

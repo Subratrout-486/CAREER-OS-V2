@@ -113,7 +113,7 @@ def test_engine_does_not_treat_auth_as_security_challenge() -> None:
     assert result.challenge is None
 
 
-def test_runner_surfaces_auth_as_needs_review(tmp_path) -> None:
+def test_runner_surfaces_auth_as_distinct_state(tmp_path) -> None:
     store = ExecutionStore(tmp_path)
     machine = __import__(
         "career_os.execution.state", fromlist=["ApplicationExecutionStateMachine"]
@@ -153,8 +153,8 @@ def test_runner_surfaces_auth_as_needs_review(tmp_path) -> None:
     assert outcome.blocked_security == 0
     persisted = store.load(execution.execution_id)
     assert persisted is not None
-    assert persisted.status == ExecutionStatus.NEEDS_REVIEW
+    assert persisted.status == ExecutionStatus.AUTH_REQUIRED
     assert (
-        "authentication required" in persisted.execution.get("failure_reason", "").casefold()
+        "authentication" in persisted.execution.get("auth_required", "").casefold()
         or "authentication" in persisted.events[-1].detail.casefold()
     )

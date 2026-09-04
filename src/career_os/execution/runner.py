@@ -13,14 +13,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
 
 from career_os.execution.engine import (
     ApplicationExecutionError,
     ApplicationExecutor,
+    ApplicationPlan,
     ExecutionResult,
     Step,
 )
+from career_os.execution.flow import detect_application_flow
 from career_os.execution.state import (
     ApplicationExecution,
     ApplicationExecutionStateMachine,
@@ -39,24 +40,11 @@ class BatchOutcome:
     verified: int = 0
     blocked_security: int = 0
     auth_required: int = 0
+    unsupported: int = 0
     failed: int = 0
     needs_review: int = 0
     skipped: int = 0
     results: dict[str, ExecutionResult] = field(default_factory=dict)
-
-
-@dataclass
-class ApplicationPlan:
-    """What the engine should do for one approved application."""
-
-    execution_id: str
-    url: str
-    profile: dict[str, Any]
-    fields: list[dict[str, Any]]
-    steps: list[Step]
-    resume_path: str | None = None
-    support_docs: list[str] = None  # type: ignore[assignment]
-    fixture_pages: dict[str, str] | None = None
 
 
 class ApplicationBatchRunner:
@@ -110,6 +98,8 @@ class ApplicationBatchRunner:
                 outcome.blocked_security += 1
             elif result.auth_required:
                 outcome.auth_required += 1
+            elif result.state == "unsupported":
+                outcome.unsupported += 1
             elif result.submitted:
                 outcome.submitted += 1
                 outcome.verified += 1
@@ -123,6 +113,22 @@ class ApplicationBatchRunner:
         outcome: ExecutionResult
 
         try:
+            flow = detect_application_flow(execution.application_url or "")
+            if not flow.supported:
+                self.machine.unsupported(
+                    execution,
+                    f"Unsupported auto-apply flow: {flow.name} ({flow.detail})",
+                )
+                self.store.save(execution)
+                return ExecutionResult(
+                    submitted=False,
+                    evidence=(),
+                    blockers=(flow.detail,),
+                    state="unsupported",
+                    reason=f"Unsupported auto-apply flow: {flow.name}",
+                    details={"flow_kind": flow.kind.value, "flow_name": flow.name},
+                )
+
             plan = self.plan_builder(execution)
             result = await self.executor.run(
                 url=plan.url,
@@ -154,7 +160,7 @@ class ApplicationBatchRunner:
         if outcome.security_blocked:
             self.machine.block_security_challenge(execution, outcome.reason)
         elif outcome.auth_required:
-            self.machine.needs_review(execution, outcome.reason or "Authentication required")
+            self.machine.auth_required(execution, outcome.reason or "Authentication required")
         elif outcome.submitted:
             self.machine.mark_submitted(execution, "; ".join(outcome.evidence))
             self.machine.verify_submission(execution, "; ".join(outcome.evidence))

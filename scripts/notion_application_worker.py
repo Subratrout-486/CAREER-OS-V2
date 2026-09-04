@@ -4,19 +4,20 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 sys.path[:0] = [str(ROOT), str(SRC)]
 
-from scripts import notion_job_worker
-from career_os.candidate_profile import load_candidate_source_of_truth
-from career_os.resume_artifact import resume_filename
 from career_os.application.submission_adapter import ApplicationSubmissionAdapter
+from career_os.candidate_profile import load_candidate_source_of_truth
+from career_os.execution.flow import detect_application_flow
+from career_os.resume_artifact import resume_filename
+from scripts import notion_job_worker
 
 JOBS_DS = os.environ.get("NOTION_JOBS_DATA_SOURCE_ID", "8374c380-f148-41ab-a77f-eb35de20f2db")
 APPLICATIONS_DS = os.environ.get("NOTION_APPLICATIONS_DATA_SOURCE_ID", "2a4c9821-f380-4a3d-a329-b8dcff959935")
@@ -128,6 +129,7 @@ def main() -> int:
                 "company": _text(page, "Company"),
                 "submitted": False,
                 "state": "deferred",
+                "flow_kind": detect_application_flow(_text(page, "Application URL")).kind.value,
                 "blockers": ["Authenticated browser handoff is unavailable in CI; application execution deferred."],
             }
             for page in candidates
@@ -144,11 +146,16 @@ def main() -> int:
         filename = resume_filename(str(profile["candidate"]["name"]), title)
         resume_path = ROOT / ".career-os" / "resume" / filename
         job = {"id": page.get("id"), "application_url": _text(page, "Application URL"), "application_decision": "apply"}
+        flow = detect_application_flow(_text(page, "Application URL"))
         try:
+            if not flow.supported:
+                row = {"job_id": page.get("id"), "job": title, "company": company, "submitted": False, "state": "unsupported", "flow_kind": flow.kind.value, "blockers": [f"Unsupported auto-apply flow: {flow.name}"]}
+                report.append(row)
+                continue
             result = adapter.execute(
                 application=_application_record_from_page(page), job=job, profile=profile, resume_path=str(resume_path)
             )
-            row = {"job_id": page.get("id"), "job": title, "company": company, "submitted": result.submitted, "state": result.state, "evidence": list(result.evidence), "blockers": list(result.blockers)}
+            row = {"job_id": page.get("id"), "job": title, "company": company, "submitted": result.submitted, "state": result.state, "flow_kind": flow.kind.value, "evidence": list(result.evidence), "blockers": list(result.blockers)}
             if result.submitted:
                 application_id = _create_application(page, result, filename)
                 notion_job_worker.notion_request(

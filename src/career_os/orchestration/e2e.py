@@ -20,8 +20,9 @@ from career_os.agents.fit_scorer import FitScorer
 from career_os.agents.jd_intelligence import JDIntelligence
 from career_os.agents.recruiter_reviewer import RecruiterReviewer
 from career_os.agents.resume_tailor import ResumeTailor
+from career_os.autoapply.adapter import build_application_plan
 from career_os.discovery.service import DiscoveryResult, JobDiscoveryService
-from career_os.execution.engine import ApplicationExecutor, Step
+from career_os.execution.engine import ApplicationExecutor
 from career_os.execution.runner import ApplicationBatchRunner, ApplicationPlan, BatchOutcome
 from career_os.execution.state import (
     ApplicationExecution,
@@ -163,19 +164,4 @@ class EndToEndOrchestrator:
 
 
 def _default_plan(execution: ApplicationExecution) -> ApplicationPlan:
-    url = execution.application_url or ""
-    fields = execution.pipeline.get("fields", []) or []
-    steps = [Step(kind="open", target=url)]
-    for field_spec in fields:
-        steps.append(Step(kind="fill", target=str(field_spec.get("key", "field"))))
-    steps.append(Step(kind="click", target="submit"))
-    steps.append(Step(kind="wait"))
-    steps.append(Step(kind="verify", target=url))
-    return ApplicationPlan(
-        execution_id=execution.execution_id,
-        url=url,
-        profile=execution.pipeline.get("profile", {}),
-        fields=fields,
-        steps=steps,
-        resume_path=execution.pipeline.get("resume_path"),
-    )
+    return build_application_plan(execution)

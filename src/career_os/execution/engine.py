@@ -53,6 +53,20 @@ class Step:
     label: str | None = None
 
 
+@dataclass
+class ApplicationPlan:
+    """What the engine should do for one approved application."""
+
+    execution_id: str
+    url: str
+    profile: dict[str, Any]
+    fields: list[dict[str, Any]]
+    steps: list[Step]
+    resume_path: str | None = None
+    support_docs: list[str] = None  # type: ignore[assignment]
+    fixture_pages: dict[str, str] | None = None
+
+
 class ApplicationExecutor:
     """Coordinate the deterministic application flow and policy checks.
 
