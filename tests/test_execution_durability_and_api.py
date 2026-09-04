@@ -30,7 +30,10 @@ def _fixture_plan_submit(execution, pages=None):
         url=execution.application_url,
         profile=execution.pipeline.get("profile", {}),
         fields=[],
-        steps=[Step(kind="open", target=execution.application_url), Step(kind="verify", target=execution.application_url)],
+        steps=[
+            Step(kind="open", target=execution.application_url),
+            Step(kind="verify", target=execution.application_url),
+        ],
         fixture_pages=pages
         or {
             "open": "<html><title>Apply</title><body>form</body></html>",
@@ -45,7 +48,11 @@ def _make(job_key, url="https://example.com/apply"):
         company="Acme",
         title="Support Engineer",
         application_url=url,
-        pipeline={"profile": {"email": "ada@example.com"}, "fields": [], "resume_path": "/tmp/r.pdf"},
+        pipeline={
+            "profile": {"email": "ada@example.com"},
+            "fields": [],
+            "resume_path": "/tmp/r.pdf",
+        },
     )
 
 
@@ -74,6 +81,31 @@ def test_restart_resumes_from_queued_state(tmp_path):
     outcome = _run(runner.execute_batch([loaded]))
     assert outcome.submitted == 1
     assert store2.by_job_key("job-r")[0].status == ExecutionStatus.SUBMISSION_VERIFIED
+
+
+def test_verified_evidence_survives_restart(tmp_path):
+    """Verification evidence is durable: it must still be present after reload."""
+    store = ExecutionStore(tmp_path)
+    machine = ApplicationExecutionStateMachine(store)
+    exc = _make("job-ve")
+    store.save(exc)
+    machine.advance_to_ready(exc)
+    machine.approve(exc)
+    store.save(exc)
+
+    runner = ApplicationBatchRunner(store, machine, plan_builder=_fixture_plan_submit)
+    queued = runner.queue_batch([exc])
+    outcome = _run(runner.execute_batch(queued))
+    assert outcome.verified == 1
+
+    # Fresh store instance = simulated process restart.
+    store2 = ExecutionStore(tmp_path)
+    loaded = store2.by_job_key("job-ve")[0]
+    assert loaded.status == ExecutionStatus.SUBMISSION_VERIFIED
+    assert loaded.execution.get("verification_evidence")
+    assert loaded.execution.get("submission_evidence")
+    assert loaded.approval.get("approved") is True
+    assert any(ev.status == ExecutionStatus.SUBMISSION_VERIFIED for ev in loaded.events)
 
 
 def test_idempotent_batch_does_not_double_submit(tmp_path):
@@ -133,7 +165,11 @@ def test_isolated_failure_one_bad_job_does_not_abort_batch(tmp_path):
             url=execution.application_url,
             profile={},
             fields=[],
-            steps=[Step(kind="open", target=execution.application_url), Step(kind="click", target="submit"), Step(kind="verify", target=execution.application_url)],
+            steps=[
+                Step(kind="open", target=execution.application_url),
+                Step(kind="click", target="submit"),
+                Step(kind="verify", target=execution.application_url),
+            ],
             fixture_pages=pages,
         )
 
@@ -181,7 +217,9 @@ def test_http_app_includes_state_router(tmp_path):
 
     store = ExecutionStore(tmp_path)
     machine = ASM(store)
-    exc = AE(job_key="app-job", company="Acme", title="Eng", application_url="https://e.com", pipeline={})
+    exc = AE(
+        job_key="app-job", company="Acme", title="Eng", application_url="https://e.com", pipeline={}
+    )
     store.save(exc)
     machine.advance_to_ready(exc)
     store.save(exc)

@@ -225,8 +225,15 @@ a:hover{color:var(--accent2)}
 
     <!-- DISCOVERY -->
     <section class="view" id="view-discovery">
-      <div class="view-head"><div><h1 class="view-title">Job discovery</h1><p class="view-sub">Every discovered and processed job with its live analytical state.</p></div>
+      <div class="view-head"><div><h1 class="view-title">Job discovery</h1><p class="view-sub">Scan a public ATS careers page or use the fixture. Every job carries its live analytical state.</p></div>
         <div style="display:flex;gap:10px"><button class="btn" id="btnDiscover"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>Run discovery fixture</button></div>
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <input id="discoverUrl" type="text" placeholder="ATS careers URL, e.g. https://boards.greenhouse.io/acme" style="flex:1;min-width:220px;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px 12px">
+          <button class="btn" id="btnDiscoverUrl"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>Scan live ATS</button>
+        </div>
+        <div id="discoverStatus" style="margin-top:10px;font-size:13px;color:var(--muted)"></div>
       </div>
       <div class="card"><div class="list" id="discoveryList"></div></div>
     </section>
@@ -486,6 +493,28 @@ el("btnDiscover").addEventListener("click", async ()=>{
     nav("approval");
   }catch(e){ toast("Discovery failed: "+e.message, true); }
   finally{ el("btnDiscover").disabled=false; el("btnDiscover").innerHTML=`<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>Run discovery fixture`; }
+});
+
+el("btnDiscoverUrl").addEventListener("click", async ()=>{
+  const url = (el("discoverUrl").value||"").trim();
+  if(!url){ toast("Enter an ATS careers URL", true); return; }
+  el("btnDiscoverUrl").disabled=true; el("btnDiscoverUrl").textContent="Scanning…";
+  el("discoverStatus").innerHTML = "";
+  try{
+    const r = await api("/api/discover",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({careers_url:url, max_jobs:50})});
+    const base = `Provider: <b>${r.provider||"unknown"}</b> · scanned <b>${r.jobs_scanned??0}</b>, unique <b>${r.unique_jobs??0}</b>, duplicates <b>${r.duplicates??0}</b>`;
+    if(r.blocked){
+      const color = "var(--danger)";
+      el("discoverStatus").innerHTML = `<span style="color:${color}">${base}. <b>${r.status.toUpperCase()}</b> — ${esc(r.reason||"No jobs accepted")}.</span>`;
+      toast(`${r.status}: ${r.reason||"no jobs accepted"}`, true);
+    } else {
+      el("discoverStatus").innerHTML = `${base}. Prepared <b>${r.prepared}</b> for approval.`;
+      toast(`Scanned ${r.provider}: ${r.prepared} ready for approval`);
+      loadDiscovery();
+      nav("approval");
+    }
+  }catch(e){ el("discoverStatus").innerHTML = `<span style="color:var(--danger)">Scan failed: ${esc(e.message)}</span>`; toast("Scan failed: "+e.message, true); }
+  finally{ el("btnDiscoverUrl").disabled=false; el("btnDiscoverUrl").innerHTML=`<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>Scan live ATS`; }
 });
 
 /* ---------- APPROVAL ---------- */
