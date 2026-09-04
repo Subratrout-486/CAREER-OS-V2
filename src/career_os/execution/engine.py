@@ -58,7 +58,11 @@ class ApplicationExecutor:
     """
 
     def __init__(self, driver: ExecutionDriver | None = None, *, max_retries: int = 2) -> None:
-        self.driver = driver or DeterministicFixtureDriver()
+        if driver is None:
+            from career_os.execution.playwright_driver import build_driver
+
+            driver = build_driver()
+        self.driver = driver
         self.max_retries = max_retries
 
     async def run(
@@ -129,7 +133,12 @@ class ApplicationExecutor:
         final = await self._do_step({"kind": "verify", "target": url}, state)
         state.update(final.get("state", {}))
         page_text = state.get("page_text", "")
-        challenge = detect_challenge(url=url, text=page_text, html=state.get("page_html", ""), title=state.get("page_title", ""))
+        challenge = detect_challenge(
+            url=url,
+            text=page_text,
+            html=state.get("page_html", ""),
+            title=state.get("page_title", ""),
+        )
         if challenge.blocked:
             return self._blocked(url, challenge)
 
@@ -191,7 +200,10 @@ def _looks_submitted(text: str) -> bool:
     import re
 
     low = text.casefold()
-    if re.search(r"(?:application|submission)\s+(?:has\s+been\s+|was\s+|is\s+)?(?:successfully\s+)?(?:submitted|received|complete)", low):
+    if re.search(
+        r"(?:application|submission)\s+(?:has\s+been\s+|was\s+|is\s+)?(?:successfully\s+)?(?:submitted|received|complete)",
+        low,
+    ):
         return True
     ok = (
         "application submitted" in low,
@@ -209,7 +221,11 @@ def _extract_evidence(state: dict[str, Any], page_text: str, url: str) -> tuple[
     import re
 
     evidence = [f"observed successful submission signal on {url}"]
-    m = re.search(r"(?:reference|confirmation|application)\s*(?:id|number|ref)\s*[:#]?\s*([A-Za-z0-9\-_]+)", page_text, re.IGNORECASE)
+    m = re.search(
+        r"(?:reference|confirmation|application)\s*(?:id|number|ref)\s*[:#]?\s*([A-Za-z0-9\-_]+)",
+        page_text,
+        re.IGNORECASE,
+    )
     if m:
         evidence.append(f"reference: {m.group(1)}")
     filled = state.get("filled", [])
@@ -302,7 +318,10 @@ def _detect_validation(html: str) -> str | None:
 
     for pattern in (
         re.compile(r"class=[\"'][^\"']*(?:error|invalid|required)[^\"']*[\"']", re.IGNORECASE),
-        re.compile(r">\s*(?:please (?:fill|correct|enter|provide)|this field is required)\s*<", re.IGNORECASE),
+        re.compile(
+            r">\s*(?:please (?:fill|correct|enter|provide)|this field is required)\s*<",
+            re.IGNORECASE,
+        ),
     ):
         if pattern.search(html):
             return "A required field is missing or invalid"
