@@ -38,6 +38,7 @@ class BatchOutcome:
     submitted: int = 0
     verified: int = 0
     blocked_security: int = 0
+    auth_required: int = 0
     failed: int = 0
     needs_review: int = 0
     skipped: int = 0
@@ -107,6 +108,8 @@ class ApplicationBatchRunner:
             outcome.results[target.execution_id] = result
             if result.security_blocked:
                 outcome.blocked_security += 1
+            elif result.auth_required:
+                outcome.auth_required += 1
             elif result.submitted:
                 outcome.submitted += 1
                 outcome.verified += 1
@@ -133,17 +136,25 @@ class ApplicationBatchRunner:
             outcome = result
         except ApplicationExecutionError as exc:
             outcome = ExecutionResult(
-                submitted=False, evidence=(), blockers=(str(exc),),
-                state="error", reason=str(exc),
+                submitted=False,
+                evidence=(),
+                blockers=(str(exc),),
+                state="error",
+                reason=str(exc),
             )
         except Exception as exc:  # noqa: BLE001 - boundary must survive unexpected driver errors
             outcome = ExecutionResult(
-                submitted=False, evidence=(), blockers=(str(exc),),
-                state="error", reason=str(exc),
+                submitted=False,
+                evidence=(),
+                blockers=(str(exc),),
+                state="error",
+                reason=str(exc),
             )
 
         if outcome.security_blocked:
             self.machine.block_security_challenge(execution, outcome.reason)
+        elif outcome.auth_required:
+            self.machine.needs_review(execution, outcome.reason or "Authentication required")
         elif outcome.submitted:
             self.machine.mark_submitted(execution, "; ".join(outcome.evidence))
             self.machine.verify_submission(execution, "; ".join(outcome.evidence))
@@ -162,7 +173,9 @@ class ApplicationBatchRunner:
         return outcome
 
 
-def _find_by_id(all_executions: list[ApplicationExecution], execution_id: str) -> ApplicationExecution | None:
+def _find_by_id(
+    all_executions: list[ApplicationExecution], execution_id: str
+) -> ApplicationExecution | None:
     for execution in all_executions:
         if execution.execution_id == execution_id:
             return execution
@@ -180,7 +193,9 @@ def _default_plan_builder(execution: ApplicationExecution) -> ApplicationPlan:
     ]
     for index, field_spec in enumerate(fields):
         key = str(field_spec.get("key", f"field-{index}"))
-        steps.append(Step(kind="fill" if field_spec.get("input_type") != "select" else "select", target=key))
+        steps.append(
+            Step(kind="fill" if field_spec.get("input_type") != "select" else "select", target=key)
+        )
     steps.append(Step(kind="click", target="submit"))
     steps.append(Step(kind="wait"))
     steps.append(Step(kind="verify", target=url))

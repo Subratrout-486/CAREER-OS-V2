@@ -148,6 +148,12 @@ export CAREER_OS_ENABLE_BROWSER=1
   classifies the run as `BLOCKED_SECURITY_CHALLENGE`. There is deliberately **no
   bypass** logic; the application is preserved for human review and never
   reported as successful.
+- **Authentication wall**: `execution/auth.py` detects a page that requires the
+  user to sign in (login form, "sign/log in" text, login URL, HTTP 401/403).
+  The engine classifies the run as `auth_required` and the runner surfaces it as
+  `NEEDS_REVIEW` with an "Authentication required" reason. This is **distinct**
+  from a CAPTCHA block and from a generic failure — it is never recorded as a
+  successful submission, and the engine performs no login or credential use.
 - **Verification**: a submission is only recorded `SUBMITTED` → `SUBMISSION_VERIFIED`
   when real confirmation evidence is present. `SUBMITTED` without evidence raises
   `APPLICATION_FAILED`/`missing_evidence`.

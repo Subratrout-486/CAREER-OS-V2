@@ -19,6 +19,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+from career_os.execution.auth import AuthRequirement, detect_auth_required
 from career_os.execution.challenge import ChallengeDetection, detect_challenge
 
 
@@ -33,6 +34,8 @@ class ExecutionResult:
     blockers: tuple[str, ...]
     security_blocked: bool = False
     challenge: ChallengeDetection | None = None
+    auth_required: bool = False
+    auth: AuthRequirement | None = None
     state: str = "unknown"
     reason: str = ""
     details: dict[str, Any] = field(default_factory=dict)
@@ -94,7 +97,7 @@ class ApplicationExecutor:
         if fixture_pages is not None:
             state["fixture_pages"] = fixture_pages
 
-        # 1. Open the application URL and check for the first challenge.
+        # 1. Open the application URL and check for challenge / auth walls.
         opened = await self._do_step({"kind": "open", "target": url}, state)
         state.update(opened.get("state", {}))
         challenge = detect_challenge(
@@ -105,6 +108,14 @@ class ApplicationExecutor:
         )
         if challenge.blocked:
             return self._blocked(url, challenge)
+        auth = detect_auth_required(
+            url=url,
+            text=state.get("page_text", ""),
+            html=state.get("page_html", ""),
+            title=state.get("page_title", ""),
+        )
+        if auth.required:
+            return self._auth_required(url, auth)
 
         # 2. Run the application steps in order with bounded retries.
         for step in steps:
@@ -141,6 +152,14 @@ class ApplicationExecutor:
         )
         if challenge.blocked:
             return self._blocked(url, challenge)
+        auth = detect_auth_required(
+            url=url,
+            text=page_text,
+            html=state.get("page_html", ""),
+            title=state.get("page_title", ""),
+        )
+        if auth.required:
+            return self._auth_required(url, auth)
 
         submitted = _looks_submitted(page_text)
         evidence = _extract_evidence(state, page_text, url) if submitted else ()
@@ -193,6 +212,18 @@ class ApplicationExecutor:
             state="blocked_security_challenge",
             reason=challenge.detail,
             details={"signals": list(challenge.signals)},
+        )
+
+    def _auth_required(self, url: str, auth: AuthRequirement) -> ExecutionResult:
+        return ExecutionResult(
+            submitted=False,
+            evidence=(),
+            blockers=(auth.detail,),
+            auth_required=True,
+            auth=auth,
+            state="auth_required",
+            reason=auth.detail,
+            details={"signals": list(auth.signals)},
         )
 
 
