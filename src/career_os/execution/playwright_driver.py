@@ -1,18 +1,14 @@
 """Playwright-backed execution driver and runtime driver selection.
 
-The retrieval engine (:mod:`career_os.execution.engine`) is driver-agnostic and
-defaults to the deterministic fixture driver so tests and environments without a
-real browser never risk contacting an employer. This module adds the real
-Playwright driver used for live application execution, selected only when
-browser execution is explicitly enabled via ``CAREER_OS_ENABLE_BROWSER=1``.
+The driver keeps one browser/page session alive for the complete application
+flow. The previous implementation launched a fresh Chromium process for every
+step, which discarded form state between ``open``/``fill``/``click``/``verify``
+and made a real multi-step application impossible.
 
-The driver mirrors the exact step contract of the engine's
-``ExecutionDriver`` protocol: each ``step(action, state)`` returns a dict that
-may include an updated ``"state"`` plus signal keys the engine consumes
-(``error``, ``retryable``, ``validation_error``, ``security_blocked``,
-``filled``, ``uploaded``). It returns resolved page text / html / title so the
-engine's challenge detection and submission verification logic is the single
-source of truth.
+A live run may either launch local Chromium or attach to an already-running
+Chromium endpoint through ``APPLICATION_BROWSER_CDP_URL``. The latter is the
+integration point for controlled remote browsers such as Fortress. Playwright
+remains the automation API in both cases.
 
 Security boundary: this driver never bypasses a CAPTCHA or security challenge.
 It only returns page content; the engine classifies any detected challenge as
@@ -28,22 +24,20 @@ from career_os.execution.engine import ExecutionDriver
 
 
 def browser_execution_enabled() -> bool:
-    """Return True only when a human has explicitly opted into live browsing.
-
-    Production operators opt in with ``CAREER_OS_ENABLE_BROWSER=1``. Absent that
-    flag (the default) the runtime uses the deterministic fixture driver and
-    never touches a real site.
-    """
-    return os.getenv("CAREER_OS_ENABLE_BROWSER", "").strip().casefold() in {"1", "true", "yes"}
+    """Return True only when a human has explicitly opted into live browsing."""
+    return os.getenv("CAREER_OS_ENABLE_BROWSER", "").strip().casefold() in {
+        "1",
+        "true",
+        "yes",
+    }
 
 
 def build_driver(*, timeout_ms: int = 30_000) -> ExecutionDriver:
     """Select the runtime driver.
 
-    Returns a :class:`PlaywrightExecutionDriver` when browser execution is
-    enabled; otherwise returns the :class:`DeterministicFallbackDriver` which
-    replays fixtures offline. A live run is never fabricated when the browser
-    is unavailable - the fallback just surfaces an explicit notice.
+    A CDP URL takes precedence over local Chromium when browser execution is
+    enabled. This allows a persistent or remote browser to be controlled with
+    the same Playwright automation layer.
     """
     if browser_execution_enabled():
         return PlaywrightExecutionDriver(timeout_ms=timeout_ms)
@@ -51,21 +45,34 @@ def build_driver(*, timeout_ms: int = 30_000) -> ExecutionDriver:
 
 
 class PlaywrightExecutionDriver(ExecutionDriver):
-    """Real browser driver built on Playwright for approved application fills.
+    """Real browser driver for approved application fills.
 
-    It fills/selects/uploads fields and advances the application, returning the
-    resolved page signals to the engine. Challenge detection and submission
-    verification are owned by the engine, not this driver.
+    The driver is intentionally stateful for one application attempt. It starts
+    Playwright/browser on the first ``open`` action and reuses the same page for
+    every subsequent action. The session is closed on ``verify`` or when an
+    unexpected error occurs.
     """
 
-    def __init__(self, *, timeout_ms: int = 30_000, headless: bool = True) -> None:
+    def __init__(self, *, timeout_ms: int = 30_000, headless: bool | None = None) -> None:
         if not browser_execution_enabled():
             raise RuntimeError(
                 "PlaywrightExecutionDriver requires CAREER_OS_ENABLE_BROWSER=1 "
                 "to be set; browser execution is disabled by default"
             )
         self.timeout_ms = timeout_ms
-        self.headless = headless
+        if headless is None:
+            self.headless = os.getenv("APPLICATION_BROWSER_HEADLESS", "1").strip().casefold() not in {
+                "0",
+                "false",
+                "no",
+            }
+        else:
+            self.headless = headless
+        self._playwright: Any | None = None
+        self._browser: Any | None = None
+        self._context: Any | None = None
+        self._page: Any | None = None
+        self._connected_over_cdp = False
 
     async def step(self, action: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
         from playwright.async_api import TimeoutError as PlaywrightTimeout
@@ -74,87 +81,163 @@ class PlaywrightExecutionDriver(ExecutionDriver):
         kind = action.get("kind")
         target = action.get("target", "")
         value = action.get("value")
-        url = (
-            action.get("target")
-            if kind == "open"
-            else (state.get("url") or action.get("target", ""))
-        )
 
         try:
-            async with async_playwright() as pw:
-                browser = await pw.chromium.launch(headless=self.headless)
-                try:
-                    page = await browser.new_page()
-                    page.set_default_timeout(self.timeout_ms)
-                    if kind in {"open", "nav"}:
-                        await page.goto(url, wait_until="domcontentloaded")
-                        return {"state": _snapshot(state, page)}
-                    if kind == "fill":
-                        locator = _locate(page, target)
-                        if await locator.count() == 0:
-                            return {
-                                "state": state,
-                                "error": f"field not found: {target}",
-                                "retryable": True,
-                            }
-                        await locator.fill(value or "")
-                        return {"state": {**state, "filled": _append(state, "filled", target)}}
-                    if kind == "select":
-                        locator = _locate(page, target)
-                        if value:
-                            try:
-                                await locator.select_option(label=value)
-                            except Exception:  # noqa: BLE001 - fall back to value match
-                                await locator.select_option(value)
-                        else:
-                            await locator.select_option(index=0)
-                        return {"state": {**state, "filled": _append(state, "filled", target)}}
-                    if kind == "checkbox":
-                        locator = _locate(page, target)
-                        if value and str(value).casefold() in {"true", "yes", "1"}:
-                            await locator.check()
-                        return {"state": {**state, "filled": _append(state, "filled", target)}}
-                    if kind == "upload":
-                        locator = page.locator("input[type='file']").first
-                        await locator.set_input_files(target)
-                        return {"state": {**state, "uploaded": _append(state, "uploaded", target)}}
-                    if kind == "click":
-                        locator = page.locator(
-                            f"button:has-text('{target}'), input[type='submit'][value='{target}']"
-                        ).first
-                        if await locator.count() == 0 and target == "submit":
-                            locator = page.locator("button[type='submit']").first
-                        await locator.click()
-                        await page.wait_for_load_state("domcontentloaded")
-                        validation = await _detect_validation_label(page)
-                        if validation:
-                            return {"state": _snapshot(state, page), "validation_error": validation}
-                        return {"state": _snapshot(state, page)}
-                    if kind == "wait":
-                        await page.wait_for_timeout(1000)
-                        return {"state": _snapshot(state, page)}
-                    if kind == "verify":
-                        return {"state": _snapshot(state, page)}
+            if kind == "open":
+                await self._ensure_session()
+                assert self._page is not None
+                self._page.set_default_timeout(self.timeout_ms)
+                await self._page.goto(target, wait_until="domcontentloaded", timeout=self.timeout_ms)
+                return {"state": await _snapshot_async(state, self._page)}
+
+            if self._page is None:
+                return {
+                    "state": state,
+                    "error": "browser session is not open; application must begin with open",
+                    "retryable": False,
+                }
+
+            page = self._page
+            page.set_default_timeout(self.timeout_ms)
+
+            if kind in {"nav"}:
+                await page.goto(target, wait_until="domcontentloaded", timeout=self.timeout_ms)
+                return {"state": await _snapshot_async(state, page)}
+
+            if kind == "fill":
+                locator = _locate(page, target)
+                if await locator.count() == 0:
                     return {
                         "state": state,
-                        "error": f"unknown step kind {kind!r}",
+                        "error": f"field not found: {target}",
+                        "retryable": True,
+                    }
+                await locator.fill(value or "")
+                return {"state": {**state, "filled": _append(state, "filled", target)}}
+
+            if kind == "select":
+                locator = _locate(page, target)
+                if await locator.count() == 0:
+                    return {
+                        "state": state,
+                        "error": f"field not found: {target}",
+                        "retryable": True,
+                    }
+                if value:
+                    try:
+                        await locator.select_option(label=value)
+                    except Exception:  # noqa: BLE001 - fall back to value match
+                        await locator.select_option(value=value)
+                else:
+                    await locator.select_option(index=0)
+                return {"state": {**state, "filled": _append(state, "filled", target)}}
+
+            if kind == "checkbox":
+                locator = _locate(page, target)
+                if await locator.count() == 0:
+                    return {
+                        "state": state,
+                        "error": f"field not found: {target}",
+                        "retryable": True,
+                    }
+                if value and str(value).casefold() in {"true", "yes", "1"}:
+                    await locator.check()
+                return {"state": {**state, "filled": _append(state, "filled", target)}}
+
+            if kind == "upload":
+                locator = _locate(page, target)
+                if await locator.count() == 0:
+                    locator = page.locator("input[type='file']").first
+                await locator.set_input_files(target)
+                return {"state": {**state, "uploaded": _append(state, "uploaded", target)}}
+
+            if kind == "click":
+                locator = _submit_locator(page, target)
+                if await locator.count() == 0:
+                    return {
+                        "state": await _snapshot_async(state, page),
+                        "error": f"unambiguous submit control not found: {target}",
                         "retryable": False,
                     }
-                finally:
-                    await browser.close()
+                await locator.click()
+                try:
+                    await page.wait_for_load_state("domcontentloaded", timeout=min(self.timeout_ms, 10_000))
+                except PlaywrightTimeout:
+                    # Some ATS forms submit through XHR and do not navigate.
+                    pass
+                validation = await _detect_validation_label(page)
+                if validation:
+                    return {"state": await _snapshot_async(state, page), "validation_error": validation}
+                return {"state": await _snapshot_async(state, page)}
+
+            if kind == "wait":
+                await page.wait_for_timeout(1000)
+                return {"state": await _snapshot_async(state, page)}
+
+            if kind == "verify":
+                result = {"state": await _snapshot_async(state, page)}
+                await self.close()
+                return result
+
+            return {
+                "state": state,
+                "error": f"unknown step kind {kind!r}",
+                "retryable": False,
+            }
         except PlaywrightTimeout as exc:
-            return {"state": state, "error": f"browser timeout: {exc}", "retryable": True}
-        except Exception as exc:  # noqa: BLE001 - driver must surface any failure to the engine
-            return {"state": state, "error": f"browser error: {exc}", "retryable": True}
+            await self.close()
+            return {"state": state, "error": f"browser timeout: {exc}", "retryable": False}
+        except Exception as exc:  # noqa: BLE001 - driver must surface failures to the engine
+            await self.close()
+            return {"state": state, "error": f"browser error: {exc}", "retryable": False}
+
+    async def _ensure_session(self) -> None:
+        if self._page is not None:
+            return
+
+        from playwright.async_api import async_playwright
+
+        self._playwright = await async_playwright().start()
+        cdp_url = os.getenv("APPLICATION_BROWSER_CDP_URL", "").strip()
+        if cdp_url:
+            self._browser = await self._playwright.chromium.connect_over_cdp(cdp_url)
+            self._connected_over_cdp = True
+            self._context = self._browser.contexts[0] if self._browser.contexts else await self._browser.new_context()
+            self._page = self._context.pages[0] if self._context.pages else await self._context.new_page()
+            return
+
+        profile_dir = os.getenv("APPLICATION_BROWSER_PROFILE", "").strip()
+        if profile_dir:
+            self._context = await self._playwright.chromium.launch_persistent_context(
+                profile_dir,
+                headless=self.headless,
+            )
+            self._browser = None
+        else:
+            self._browser = await self._playwright.chromium.launch(headless=self.headless)
+            self._context = await self._browser.new_context()
+        self._page = self._context.pages[0] if self._context.pages else await self._context.new_page()
+
+    async def close(self) -> None:
+        """Close the local automation session without deleting remote browser state."""
+        try:
+            if self._context is not None and not self._connected_over_cdp:
+                await self._context.close()
+            elif self._browser is not None and self._connected_over_cdp:
+                # Disconnect from a remote browser; do not intentionally shut it down.
+                await self._browser.close()
+        finally:
+            if self._playwright is not None:
+                await self._playwright.stop()
+            self._playwright = None
+            self._browser = None
+            self._context = None
+            self._page = None
+            self._connected_over_cdp = False
 
 
 class DeterministicFallbackDriver(ExecutionDriver):
-    """Fallback driver which replays fixtures without a real browser.
-
-    Used whenever browser execution is not enabled. It surfaces an explicit
-    notice that no live browsing occurred so a run can never be mistaken for a
-    real application.
-    """
+    """Fallback driver which replays fixtures without a real browser."""
 
     def __init__(self) -> None:
         from career_os.execution.engine import DeterministicFixtureDriver
@@ -172,7 +255,22 @@ class DeterministicFallbackDriver(ExecutionDriver):
 
 
 def _locate(page: Any, key: str) -> Any:
-    return page.locator(f"#{key}, [name='{key}']").first
+    # Prefer stable ids/names. Do not interpolate arbitrary labels into a CSS
+    # selector; field keys are generated internally by the plan builder.
+    escaped = str(key).replace("'", "\\'")
+    return page.locator(f"#{escaped}, [name='{escaped}']").first
+
+
+def _submit_locator(page: Any, target: str) -> Any:
+    if target != "submit":
+        return page.locator(
+            f"button:has-text('{str(target).replace(chr(39), chr(92)+chr(39))}'), "
+            f"input[type='submit'][value='{str(target).replace(chr(39), chr(92)+chr(39))}']"
+        ).first
+    return page.locator(
+        "button[type='submit'], input[type='submit'], "
+        "button:has-text('Submit'), button:has-text('Apply')"
+    ).first
 
 
 def _append(state: dict[str, Any], key: str, value: str) -> list[str]:
@@ -194,15 +292,15 @@ async def _detect_validation_label(page: Any) -> str | None:
     return None
 
 
-def _snapshot(state: dict[str, Any], page: Any) -> dict[str, Any]:
+async def _snapshot_async(state: dict[str, Any], page: Any) -> dict[str, Any]:
     import re
 
-    html = page.content()
+    html = await page.content()
     text = re.sub(r"<[^>]+>", " ", html).strip()
     return {
         **state,
         "page_html": html,
         "page_text": text,
-        "page_title": page.title(),
+        "page_title": await page.title(),
         "url": page.url,
     }
