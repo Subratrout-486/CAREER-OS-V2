@@ -397,16 +397,17 @@ async function loadOverview(){
     {k:t.jobs_discovered??0, l:"Jobs discovered", add:"from persisted store"},
     {k:t.high_fit??0, l:"High-fit roles", add:"fit ≥ 80"},
     {k:(t.awaiting_approval??0)+(t.approved??0), l:"Ready / approved", add:"human gate"},
-    {k:d.approval_queue_count??0, l:"Awaiting approval", add:"review queue"}
+    {k:d.approval_queue_count??0, l:"Awaiting approval", add:"review queue"},
+    {k:t.needs_review??0, l:"Needs review", add:"unresolved / unverified"}
   ];
   el("ovMetrics").innerHTML = metrics.map(m=>`<div class="card metric"><div class="k">${m.k}</div><div class="l">${m.l}</div><div class="add">${m.add}</div></div>`).join("");
   el("ovPipeline").innerHTML = pipelineHTML([
     ["Discovery",t.jobs_discovered??0],["Analyzed",t.jobs_analyzed??0],["Ready",t.awaiting_approval??0],
     ["Approved",t.approved??0],["Queued",t.queued??0],["Applying",t.applying??0],["Submitted",t.submitted??0],
-    ["Failed",t.failed??0],["Blocked",t.blocked??0]
+    ["Failed",t.failed??0],["Blocked",t.blocked??0],["Auth",t.auth_required??0],["Unverified",t.unverified??0]
   ]);
   el("ovHealth").style.width = (d.pipeline_health||0)+"%";
-  el("ovHealthText").textContent = `${d.pipeline_health||0}% healthy · ${t.failed||0} failed · ${t.blocked||0} blocked · ${t.needs_review||0} review`;
+  el("ovHealthText").textContent = `${d.pipeline_health||0}% healthy · ${t.failed||0} failed · ${t.blocked||0} blocked · ${t.auth_required||0} auth · ${t.unverified||0} unverified · ${t.needs_review||0} review`;
   const ph = d.provider_health||{};
   el("ovProviders").innerHTML = Object.entries(ph).map(([name,info])=>{
     const ok = info && info.available;
@@ -566,7 +567,7 @@ async function approveJob(id, btn){
 }
 
 /* ---------- EXECUTION ---------- */
-const execStages = ["READY_FOR_APPROVAL","APPROVED","QUEUED","APPLYING","SUBMITTED","SUBMISSION_VERIFIED"];
+const execStages = ["READY_FOR_APPROVAL","APPROVED","QUEUED","APPLYING","SUBMITTED","SUBMISSION_VERIFIED","SUBMISSION_UNVERIFIED"];
 async function loadExecution(){
   el("execList").innerHTML = `<div class="empty"><div class="shimmer big" style="width:220px;height:20px;border-radius:6px"></div><div class="shimmer" style="width:300px;height:12px;border-radius:5px;margin-top:10px"></div></div>`;
   const d = await jsonOrEmpty("/api/executions");

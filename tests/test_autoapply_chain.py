@@ -245,6 +245,7 @@ def test_already_completed_execution_is_skipped(tmp_path):
     machine.advance_to_ready(execution)
     machine.approve(execution)
     machine.queue(execution)
+    machine.begin_apply(execution)
     machine.mark_submitted(execution, "reference ABC-123")
     machine.verify_submission(execution, "reference ABC-123")
     store.save(execution)
@@ -280,7 +281,7 @@ def test_all_contract_statuses_are_serializable(tmp_path):
     machine = ApplicationExecutionStateMachine(store)
     for status, apply in [
         (ExecutionStatus.SUBMISSION_VERIFIED, lambda e: (
-            machine.mark_submitted(e, "ref"), machine.verify_submission(e, "ref")
+            machine.queue(e), machine.begin_apply(e), machine.mark_submitted(e, "ref"), machine.verify_submission(e, "ref")
         )),
         (ExecutionStatus.AUTH_REQUIRED, lambda e: machine.auth_required(e, "login")),
         (ExecutionStatus.UNSUPPORTED, lambda e: machine.unsupported(e, "no flow")),
