@@ -53,10 +53,22 @@ class DashboardService:
                 "company": e.company,
                 "title": e.title,
                 "status": e.status,
-                "detail": e.execution.get("failure_reason") or e.execution.get("security_challenge") or "",
+                "detail": (
+                    e.execution.get("failure_reason")
+                    or e.execution.get("security_challenge")
+                    or e.execution.get("submission_verification_required")
+                    or ""
+                ),
             }
             for e in sorted(executions, key=lambda x: x.updated_at, reverse=True)[:10]
-            if e.status in {ExecutionStatus.APPLICATION_FAILED, ExecutionStatus.BLOCKED_SECURITY_CHALLENGE, ExecutionStatus.NEEDS_REVIEW}
+            if e.status
+            in {
+                ExecutionStatus.APPLICATION_FAILED,
+                ExecutionStatus.BLOCKED_SECURITY_CHALLENGE,
+                ExecutionStatus.NEEDS_REVIEW,
+                ExecutionStatus.AUTH_REQUIRED,
+                ExecutionStatus.SUBMISSION_UNVERIFIED,
+            }
         ]
 
         total = len(executions)
@@ -80,7 +92,10 @@ class DashboardService:
                 "submitted": submitted,
                 "failed": by_status.get(ExecutionStatus.APPLICATION_FAILED, 0),
                 "blocked": by_status.get(ExecutionStatus.BLOCKED_SECURITY_CHALLENGE, 0),
+                "auth_required": by_status.get(ExecutionStatus.AUTH_REQUIRED, 0),
+                "unverified": by_status.get(ExecutionStatus.SUBMISSION_UNVERIFIED, 0),
                 "needs_review": by_status.get(ExecutionStatus.NEEDS_REVIEW, 0),
+                "unsupported": by_status.get(ExecutionStatus.UNSUPPORTED, 0),
             },
             "by_status": by_status,
             "provider_health": provider_health,

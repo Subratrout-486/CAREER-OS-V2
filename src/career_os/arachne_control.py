@@ -38,6 +38,7 @@ _EXECUTION_ORDER = [
     ExecutionStatus.APPLYING,
     ExecutionStatus.SUBMITTED,
     ExecutionStatus.SUBMISSION_VERIFIED,
+    ExecutionStatus.SUBMISSION_UNVERIFIED,
 ]
 
 
@@ -104,14 +105,39 @@ def create_arachne_control_router(
     control = APIRouter(prefix="/api", tags=["arachne-control"])
 
     # ------------------------------------------------------------------ overview
+    _STATUS_BUCKETS = (
+        "READY_FOR_APPROVAL",
+        "APPROVED",
+        "QUEUED",
+        "APPLYING",
+        "SUBMITTED",
+        "SUBMISSION_VERIFIED",
+        "SUBMISSION_UNVERIFIED",
+        "APPLICATION_FAILED",
+        "BLOCKED_SECURITY_CHALLENGE",
+        "AUTH_REQUIRED",
+        "UNSUPPORTED",
+        "NEEDS_REVIEW",
+        "WITHDRAWN",
+    )
+
+    def _status_counts() -> dict[str, int]:
+        counts = dict.fromkeys(_STATUS_BUCKETS, 0)
+        for e in exec_store.list():
+            counts[str(e.status)] = counts.get(str(e.status), 0) + 1
+        counts["total"] = sum(counts[k] for k in _STATUS_BUCKETS)
+        return counts
+
     @control.get("/overview")
     def overview() -> dict[str, Any]:
         snapshot = dashboard_service.snapshot()
         executions = exec_store.list()
         queue = [e for e in executions if e.status == ExecutionStatus.READY_FOR_APPROVAL]
+        status = _status_counts()
         return {
             "generated_at": snapshot["generated_at"],
             "totals": snapshot["totals"],
+            "status_counts": status,
             "pipeline_health": snapshot["pipeline_health"],
             "provider_health": snapshot["provider_health"],
             "latest_execution": snapshot["latest_execution"],
@@ -193,7 +219,53 @@ def create_arachne_control_router(
         exec_store.save(execution)
         return {"ok": True, "execution": _execution_payload(execution)}
 
-    # ------------------------------------------------------------- execution/history
+    # ------------------------------------------------------- review & resume lists
+    @control.get("/needs-review")
+    def needs_review() -> dict[str, Any]:
+        executions = [
+            e for e in exec_store.list() if e.status == ExecutionStatus.NEEDS_REVIEW
+        ]
+        executions.sort(key=lambda x: x.updated_at, reverse=True)
+        return {
+            "count": len(executions),
+            "items": [
+                {
+                    "execution_id": e.execution_id,
+                    "company": e.company,
+                    "title": e.title,
+                    "application_url": e.application_url,
+                    "prepared_at": max((ev.occurred_at for ev in e.events), default=""),
+                    "blockers": (e.execution or {}).get("review_fields")
+                    or (e.execution or {}).get("blockers", []),
+                    "unverified": bool((e.execution or {}).get("submission_unverified")),
+                    "detail": (e.events[-1].detail if e.events else ""),
+                }
+                for e in executions
+            ],
+        }
+
+    @control.get("/resumes")
+    def resumes() -> dict[str, Any]:
+        """List tailored resume artifacts available for application uploads."""
+        root = Path(
+            os.getenv(
+                "CAREER_OS_RESUME_ROOT",
+                (Path.cwd() / ".career-os" / "resumes"),
+            )
+        )
+        if not root.is_dir():
+            return {"count": 0, "resumes": []}
+        artifacts = [
+            {
+                "filename": p.name,
+                "path": str(p),
+                "bytes": p.stat().st_size,
+                "modified": p.stat().st_mtime,
+            }
+            for p in sorted(root.glob("*.pdf"))
+        ]
+        return {"count": len(artifacts), "root": str(root), "resumes": artifacts}
+
     @control.get("/executions")
     def executions() -> dict[str, Any]:
         records = exec_store.list()

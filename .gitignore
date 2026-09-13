@@ -25,3 +25,6 @@ htmlcov/
 
 # runtime state (execution store, arachne index, checkpoints, idempotency)
 .career_os/
+
+# generated resume artifacts (kept out of VCS; .career-os/ docs remain tracked)
+.career-os/resumes/

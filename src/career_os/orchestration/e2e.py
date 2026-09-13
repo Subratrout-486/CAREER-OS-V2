@@ -10,8 +10,10 @@ classified as BLOCKED_SECURITY_CHALLENGE and never bypassed.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from career_os.agents.application_manager import ApplicationManager
 from career_os.agents.ats_auditor import ATSAuditor
@@ -30,7 +32,7 @@ from career_os.execution.state import (
     ExecutionStore,
 )
 from career_os.models.evidence import EvidenceClaim
-from career_os.models.resume import ResumeProfile
+from career_os.models.resume import ResumeProfile, TailoredResume
 
 
 @dataclass
@@ -79,6 +81,52 @@ class EndToEndOrchestrator:
         self.plan_builder = plan_builder
         self._store = store
 
+    def _candidate_source(self):  # noqa: ANN201 - light loader used only for resume artifact naming
+        from career_os.candidate_profile import load_candidate_source_of_truth
+
+        return load_candidate_source_of_truth(
+            Path(os.getenv("CAREER_OS_CANDIDATE_PATH", "candidate/source_of_truth.json"))
+        )
+
+    def _persist_resume_pdf(self, *, profile: dict[str, object], tailored: TailoredResume, target_role: str) -> str | None:
+        """Render the tailored resume to a validated PDF artifact for upload.
+
+        Renders to ``.career-os/resumes/Subrat_Rout_[Target_Role].pdf`` and
+        validates it before returning the path. Returns ``None`` (never a fake
+        path) when rendering/validation fails so the application can proceed
+        without a fabricated resume.
+        """
+        try:
+            from career_os.resume_artifact import (
+                render_resume_html,
+                render_resume_pdf,
+                resume_filename,
+                validate_resume_pdf,
+            )
+        except Exception:  # noqa: BLE001 - optional rendering must not abort the loop
+            return None
+
+        try:
+            source = self._candidate_source()
+            candidate = source.get("candidate", {}) or {}
+            name = str(candidate.get("name", "")).strip()
+            filename = resume_filename(name, target_role)
+            root = Path(os.getenv("CAREER_OS_RESUME_ROOT", ".career-os/resumes"))
+            root.mkdir(parents=True, exist_ok=True)
+            html_path = root / filename.replace(".pdf", ".html")
+            pdf_path = root / filename
+            html_path.write_text(
+                render_resume_html(profile, tailored, target_role=target_role),
+                encoding="utf-8",
+            )
+            render_resume_pdf(html_path.read_text(encoding="utf-8"), pdf_path)
+            if not pdf_path.is_file() or pdf_path.stat().st_size == 0:
+                return None
+            validate_resume_pdf(pdf_path, name)
+            return str(pdf_path)
+        except Exception:  # noqa: BLE001 - a failed resume render never blocks discovery
+            return None
+
     def prepare(self, discovered: DiscoveryResult) -> list[ApplicationExecution]:
         """Turn discovered jobs into prepared executions at READY_FOR_APPROVAL.
 
@@ -88,6 +136,29 @@ class EndToEndOrchestrator:
             raise RuntimeError("prepare requires an ExecutionStore")
         machine = ApplicationExecutionStateMachine(self._store)
         executions: list[ApplicationExecution] = []
+        candidate_profile = self._candidate_source()
+        profile_map = {
+            "summary": self.resume.summary,
+            "bullets": [
+                {"text": b.text, "evidence_claim_ids": list(b.evidence_claim_ids)}
+                for b in self.resume.bullets
+            ],
+        }
+        candidate_info = candidate_profile.get("candidate", {}) or {}
+        if isinstance(candidate_info, dict):
+            # Verified flat candidate fields, derived from the Source of Truth
+            # only. Full name is split into first/last deterministically so the
+            # form mapper can answer first/last-name controls.
+            name = str(candidate_info.get("name", "")).strip()
+            if name:
+                profile_map["full_name"] = name
+                parts = name.split(" ", 1)
+                profile_map["first_name"] = parts[0]
+                if len(parts) > 1:
+                    profile_map["last_name"] = parts[1]
+            for key in ("email", "phone", "linkedin_url", "portfolio_url", "location", "headline", "work_authorization", "sponsorship"):
+                if candidate_info.get(key):
+                    profile_map[key] = candidate_info[key]
         for job in discovered.unique_jobs:
             try:
                 jd = self.jd_intelligence.analyze(job.record.description or "")
@@ -96,21 +167,21 @@ class EndToEndOrchestrator:
                 tailored = self.resume_tailor.tailor(self.resume, jd, ledger)
                 ats = self.ats_auditor.audit(tailored, jd)
                 review = self.recruiter_reviewer.review(jd, tailored, fit, ledger)
+                resume_path = self._persist_resume_pdf(
+                    profile=candidate_profile,
+                    tailored=tailored,
+                    target_role=job.record.title or "Target_Role",
+                )
                 execution = ApplicationExecution(
                     job_key=str(job.record.job_id),
                     company=job.record.company,
                     title=job.record.title,
                     application_url=str(job.record.source_url),
                     pipeline={
-                        "profile": {
-                            "summary": self.resume.summary,
-                            "bullets": [
-                                {"text": b.text, "evidence_claim_ids": list(b.evidence_claim_ids)}
-                                for b in tailored.bullets
-                            ],
-                            "matched_keywords": list(tailored.matched_keywords),
-                        },
+                        "profile": profile_map,
                         "fields": [],
+                        "resume_path": resume_path,
+                        "target_role": job.record.title or "",
                         "fit": fit.to_dict(),
                         "jd": jd.to_dict(),
                         "evidence": [
