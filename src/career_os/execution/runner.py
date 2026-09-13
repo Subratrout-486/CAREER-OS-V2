@@ -43,6 +43,7 @@ class BatchOutcome:
     unsupported: int = 0
     failed: int = 0
     needs_review: int = 0
+    unverified: int = 0
     skipped: int = 0
     results: dict[str, ExecutionResult] = field(default_factory=dict)
 
@@ -100,9 +101,14 @@ class ApplicationBatchRunner:
                 outcome.auth_required += 1
             elif result.state == "unsupported":
                 outcome.unsupported += 1
+            elif result.state == "needs_review":
+                outcome.needs_review += 1
             elif result.submitted:
                 outcome.submitted += 1
-                outcome.verified += 1
+                if result.state == "submission_unverified":
+                    outcome.unverified += 1
+                else:
+                    outcome.verified += 1
             else:
                 outcome.failed += 1
         return outcome
@@ -161,9 +167,23 @@ class ApplicationBatchRunner:
             self.machine.block_security_challenge(execution, outcome.reason)
         elif outcome.auth_required:
             self.machine.auth_required(execution, outcome.reason or "Authentication required")
+        elif outcome.state == "unsupported":
+            self.machine.unsupported(execution, outcome.reason or "Unsupported application flow")
+        elif outcome.state == "needs_review":
+            self.machine.needs_review(execution, outcome.reason or "Required application fields are unresolved")
+            execution.execution["review_fields"] = list(outcome.blockers)
         elif outcome.submitted:
-            self.machine.mark_submitted(execution, "; ".join(outcome.evidence))
-            self.machine.verify_submission(execution, "; ".join(outcome.evidence))
+            if outcome.state == "submission_unverified":
+                # The submit action happened but the confirmation could not be
+                # verified. Persist the ambiguity; never report false success.
+                self.machine.unverified_submission(
+                    execution,
+                    outcome.reason or "Submission could not be verified; requires manual confirmation",
+                )
+                execution.execution["blockers"] = list(outcome.blockers)
+            else:
+                self.machine.mark_submitted(execution, "; ".join(outcome.evidence))
+                self.machine.verify_submission(execution, "; ".join(outcome.evidence))
             execution.execution["result"] = {
                 "evidence": list(outcome.evidence),
                 "details": outcome.details,

@@ -48,6 +48,7 @@ class ExecutionStatus(str):
     APPLYING = "APPLYING"
     SUBMITTED = "SUBMITTED"
     SUBMISSION_VERIFIED = "SUBMISSION_VERIFIED"
+    SUBMISSION_UNVERIFIED = "SUBMISSION_UNVERIFIED"
     APPLICATION_FAILED = "APPLICATION_FAILED"
     BLOCKED_SECURITY_CHALLENGE = "BLOCKED_SECURITY_CHALLENGE"
     AUTH_REQUIRED = "AUTH_REQUIRED"
@@ -212,12 +213,35 @@ class ApplicationExecutionStateMachine:
         return execution
 
     def mark_submitted(self, execution: ApplicationExecution, evidence: str) -> ApplicationExecution:
+        if execution.status != ExecutionStatus.APPLYING:
+            raise ExecutionTransitionError(
+                f"Cannot mark submitted from {execution.status}; must be APPLYING"
+            )
         if not evidence or not evidence.strip():
             raise ExecutionTransitionError("Submission requires verification evidence")
         execution.execution["submission_evidence"] = evidence
         execution.record(
             ExecutionStatus.SUBMITTED,
             detail="External submission observed with evidence",
+        )
+        return execution
+
+    def unverified_submission(self, execution: ApplicationExecution, detail: str) -> ApplicationExecution:
+        """Record that a submit action occurred but confirmation could not be verified.
+
+        This is distinct from SUCCEEDED: the application may or may not have been
+        received, so it must go back to a human rather than being counted as a
+        successful submission.
+        """
+        if execution.status != ExecutionStatus.APPLYING:
+            raise ExecutionTransitionError(
+                f"Cannot record unverified submission from {execution.status}; must be APPLYING"
+            )
+        execution.execution["submission_unverified"] = True
+        execution.execution["submission_verification_required"] = detail
+        execution.record(
+            ExecutionStatus.SUBMISSION_UNVERIFIED,
+            detail=detail or "Submission confirmation could not be verified",
         )
         return execution
 

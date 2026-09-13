@@ -18,6 +18,12 @@ from career_os.execution.engine import (
     ExecutionResult,
     Step,
 )
+from career_os.execution.forms import (
+    FieldMapping,
+    FormField,
+    discover_fields,
+    map_discovered_fields,
+)
 from career_os.execution.runner import (
     ApplicationBatchRunner,
     ApplicationPlan,
@@ -42,6 +48,10 @@ __all__ = [
     "ExecutionResult",
     "ExecutionStatus",
     "ExecutionStore",
+    "FieldMapping",
+    "FormField",
     "Step",
     "detect_challenge",
+    "discover_fields",
+    "map_discovered_fields",
 ]
