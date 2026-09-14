@@ -40,10 +40,10 @@ def test_root_serves_the_arachne_dashboard() -> None:
         "Career Intelligence OS",
         "JOB",
         "PIPELINE",
-        "AGENTS",
-        "TRUTH GUARD",
-        "APPROVAL GATE",
-        "SECURITY BOUNDARY",
+        "AGENT FLEET",
+        "Truth Guard",
+        "Approval Gate",
+        "Security Boundary",
     ):
         assert marker in body
 
