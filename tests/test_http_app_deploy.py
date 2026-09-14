@@ -32,13 +32,18 @@ def test_root_serves_the_arachne_dashboard() -> None:
     assert response.headers["content-type"].startswith("text/html")
     body = response.text
     assert "ARACHNE" in body
+    # These are stable semantic markers from the current cinematic control
+    # plane. The detailed views are validated through their backing API
+    # endpoints below, so this contract does not couple the test to old nav
+    # wording from the previous dashboard generation.
     for marker in (
-        "Overview",
-        "Job Discovery",
-        "Approval Queue",
-        "Workflow History",
-        "Interview Prep",
-        "Learning",
+        "Career Intelligence OS",
+        "JOB",
+        "PIPELINE",
+        "AGENTS",
+        "TRUTH GUARD",
+        "APPROVAL GATE",
+        "SECURITY BOUNDARY",
     ):
         assert marker in body
 
