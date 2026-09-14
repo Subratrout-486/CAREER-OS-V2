@@ -1,0 +1,117 @@
+name: Direct Public Job Acceptance
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [feat/direct-public-job-ready-pipeline]
+  schedule:
+    - cron: "37 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: career-os-direct-public-job-acceptance
+  cancel-in-progress: true
+
+jobs:
+  direct-public-job:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out exact commit
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Career OS
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Install Chromium for resume PDF validation
+        run: python -m playwright install --with-deps chromium
+
+      - name: Process a fresh public job without external credentials
+        env:
+          CAREER_OS_PUBLIC_JOB_QUERY: "support engineer"
+          CAREER_OS_PUBLIC_API_MAX_AGE_DAYS: "2"
+          CAREER_OS_DIRECT_MAX_JOBS: "8"
+          PYTHONPATH: src
+        run: python scripts/direct_public_job_cycle.py
+
+      - name: Verify READY TO APPLY acceptance record
+        run: |
+          set -euo pipefail
+          test -s .career-os/direct-public-job-cycle.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('.career-os/direct-public-job-cycle.json').read_text())
+          if data.get('success') is not True:
+              raise SystemExit(f"No READY TO APPLY job was produced: {data}")
+          records = data.get('ready_to_apply') or []
+          if not records:
+              raise SystemExit('Acceptance report has no READY TO APPLY records')
+          record = records[0]
+          required = {'record_id', 'run_id', 'job_id', 'source_url', 'title', 'company', 'completed_stages', 'resume_pdf', 'resume_validation'}
+          missing = required - set(record)
+          if missing:
+              raise SystemExit(f'Missing acceptance evidence fields: {sorted(missing)}')
+          expected = ['job_intake', 'jd_intelligence', 'evidence_analysis', 'fit_scoring', 'resume_tailoring', 'ats_audit', 'recruiter_review', 'application_readiness']
+          if record['completed_stages'] != expected:
+              raise SystemExit(f"Incomplete pipeline stages: {record['completed_stages']}")
+          if record['resume_validation'].get('valid') is not True:
+              raise SystemExit(f"Resume validation failed: {record['resume_validation']}")
+          if not record['source_url'].startswith('http'):
+              raise SystemExit('Source URL is not a public HTTP(S) URL')
+          print('READY TO APPLY acceptance record:', record['record_id'])
+          print('Job:', record['company'], '-', record['title'])
+          print('Source:', record['source_url'])
+          print('Stages:', ' -> '.join(record['completed_stages']))
+          print('Resume:', record['resume_pdf'])
+          PY
+
+      - name: Publish acceptance summary
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo '## Career OS direct public-job acceptance'
+            echo
+            if [[ -f .career-os/direct-public-job-cycle.json ]]; then
+              python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('.career-os/direct-public-job-cycle.json').read_text())
+          print(f"- Success: **{data.get('success')}**")
+          print(f"- Fresh candidates: **{data.get('fresh_candidates')}**")
+          print(f"- Processed: **{data.get('processed_count')}**")
+          print(f"- READY TO APPLY: **{data.get('ready_to_apply_count')}**")
+          for record in data.get('ready_to_apply', []):
+              print(f"- Record: `{record.get('record_id')}` — {record.get('company')} / {record.get('title')}")
+              print(f"- Source: {record.get('source_url')}")
+          PY
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload acceptance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: career-os-direct-public-job-acceptance
+          path: |
+            .career-os/direct-public-job-cycle.json
+            .career-os/direct-public-job-checkpoints/
+            .career-os/arachne/index.json
+            .career-os/resume/
+          if-no-files-found: warn
+          include-hidden-files: true
